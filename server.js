@@ -123,9 +123,10 @@ function bufferToBase64(buffer, mimetype) {
 }
 
 // Email transporter configuration
+// Email transporter configuration
 let transporter;
 try {
-    transporter = nodemailer.createTransporter({
+    transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
             user: EMAIL_USER,
@@ -145,7 +146,6 @@ try {
     console.warn('Email transporter initialization failed. Emails will not be sent.');
     transporter = null;
 }
-
 // Authentication middleware
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
