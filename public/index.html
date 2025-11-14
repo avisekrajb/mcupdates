@@ -2908,7 +2908,7 @@
     </footer>
 
     <script>
-  // API Base URL - Auto-detect based on current host
+// API Base URL - Auto-detect based on current host
 const API_BASE = '/api';
 
 // DOM Elements
@@ -2965,6 +2965,22 @@ let allServices = [];
 
 // Service prices (will be loaded from database)
 let servicePrices = {};
+
+// Enhanced service icons mapping
+const serviceIcons = {
+    'weddingphotography': { icon: 'fas fa-ring', color: '#FF6B6B', name: 'Wedding Photography' },
+    'photosessions': { icon: 'fas fa-camera', color: '#4ECDC4', name: 'Photo Sessions' },
+    'portraits': { icon: 'fas fa-user', color: '#4ECDC4', name: 'Portrait' },
+    'photoshoots': { icon: 'fas fa-camera-retro', color: '#4ECDC4', name: 'Photo Shoots' },
+    'programevents': { icon: 'fas fa-calendar-alt', color: '#FFD166', name: 'Program Events' },
+    'sponsorshipevents': { icon: 'fas fa-handshake', color: '#06D6A0', name: 'Sponsorship Events' },
+    'eventphotography': { icon: 'fas fa-calendar-check', color: '#FFD166', name: 'Event Photography' },
+    'commercialphotography': { icon: 'fas fa-briefcase', color: '#2196F3', name: 'Commercial Photography' },
+    'familyphotography': { icon: 'fas fa-users', color: '#4ECDC4', name: 'Family Photography' },
+    'portraitsessions': { icon: 'fas fa-portrait', color: '#4ECDC4', name: 'Portrait Sessions' },
+    'corporateevents': { icon: 'fas fa-building', color: '#2196F3', name: 'Corporate Events' },
+    'productphotography': { icon: 'fas fa-box', color: '#2196F3', name: 'Product Photography' }
+};
 
 // Navigation
 function showSection(sectionId) {
@@ -3132,6 +3148,12 @@ async function loadCarousel() {
 
 // Toast messages (2 seconds only)
 function showToast(message, type = 'info') {
+    // Remove existing toast if present
+    const existingToast = document.querySelector('.toast.show');
+    if (existingToast) {
+        existingToast.remove();
+    }
+    
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     
@@ -3154,15 +3176,17 @@ function showToast(message, type = 'info') {
     setTimeout(() => {
         toast.classList.remove('show');
         setTimeout(() => {
-            toast.remove();
+            if (toast.parentNode) {
+                toast.remove();
+            }
         }, 300);
     }, 2000);
 }
 
-// API Request Helper
+// Enhanced API Request Helper with better error handling
 async function apiRequest(url, options = {}) {
     try {
-        const response = await fetch(`${API_BASE}${url}`, {
+        const response = await fetch(`/api${url}`, {
             headers: {
                 'Content-Type': 'application/json',
                 ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
@@ -3171,16 +3195,77 @@ async function apiRequest(url, options = {}) {
             ...options
         });
 
+        // Handle non-JSON responses
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Server returned non-JSON response');
+        }
+
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(data.error || 'Something went wrong');
+            // Handle specific error cases
+            if (response.status === 401) {
+                // Token expired or invalid
+                localStorage.removeItem('authToken');
+                sessionStorage.removeItem('authToken');
+                authToken = null;
+                isLoggedIn = false;
+                userData = null;
+                updateProfileDropdown();
+                showToast('Session expired. Please login again.', 'error');
+                showSection('login');
+            }
+            throw new Error(data.error || `Server error: ${response.status}`);
         }
         
         return data;
     } catch (error) {
         console.error('API Request failed:', error);
+        
+        // Show user-friendly error messages
+        if (error.message.includes('Failed to fetch')) {
+            showToast('Network error. Please check your connection.', 'error');
+        } else if (error.message.includes('Server error')) {
+            showToast('Server is temporarily unavailable. Please try again later.', 'error');
+        } else if (error.message.includes('non-JSON response')) {
+            showToast('Server configuration error. Please contact support.', 'error');
+        } else {
+            showToast(error.message || 'Something went wrong', 'error');
+        }
+        
         throw error;
+    }
+}
+
+// Enhanced login persistence - use localStorage instead of sessionStorage
+function checkSavedLogin() {
+    const savedToken = localStorage.getItem('authToken') || sessionStorage.getItem('authToken');
+    if (savedToken) {
+        authToken = savedToken;
+        console.log('Found saved token, verifying...');
+        // Verify token and get user data
+        apiRequest('/profile')
+            .then(profile => {
+                isLoggedIn = true;
+                userData = profile;
+                console.log('User verified:', userData.fullName);
+                if (userData.role === 'admin') {
+                    isAdmin = true;
+                    showAdminPanel();
+                } else {
+                    updateProfileDropdown();
+                }
+                // Save token to localStorage for persistence
+                localStorage.setItem('authToken', authToken);
+            })
+            .catch(() => {
+                // Token is invalid, clear it
+                console.log('Token invalid, clearing...');
+                localStorage.removeItem('authToken');
+                sessionStorage.removeItem('authToken');
+                authToken = null;
+            });
     }
 }
 
@@ -3196,6 +3281,9 @@ async function login(email, password) {
         userData = data.user;
         authToken = data.token;
 
+        // Save token to localStorage for persistent login
+        localStorage.setItem('authToken', authToken);
+
         if (userData.role === 'admin') {
             isAdmin = true;
             showAdminPanel();
@@ -3206,9 +3294,6 @@ async function login(email, password) {
             showToast('Login successful!', 'success');
             updateProfileDropdown();
         }
-        
-        // Save token to sessionStorage
-        sessionStorage.setItem('authToken', authToken);
     } catch (error) {
         showToast(error.message || 'Invalid email or password', 'error');
     }
@@ -3303,14 +3388,15 @@ function hideAdminPanel() {
     adminPanel.style.display = 'none';
 }
 
-// Logout functionality
+// Enhanced logout function
 function logout() {
     isLoggedIn = false;
     isAdmin = false;
     userData = null;
     authToken = null;
     
-    // Clear session storage
+    // Clear all storage
+    localStorage.removeItem('authToken');
     sessionStorage.removeItem('authToken');
     
     if (currentSection === 'admin') {
@@ -3347,7 +3433,7 @@ async function loadUserProfile() {
     }
 }
 
-// Load user bookings
+// Enhanced user bookings display with icons
 async function loadUserBookings() {
     if (!userData) return;
     
@@ -3356,26 +3442,30 @@ async function loadUserBookings() {
         bookingsBody.innerHTML = '';
         
         if (bookings.length === 0) {
-            bookingsBody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No bookings found</td></tr>';
+            bookingsBody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem; color: #666;">No bookings found. <a href="#" class="nav-link" data-section="booking-form" style="color: var(--primary);">Book your first session!</a></td></tr>';
             return;
         }
         
         bookings.forEach(booking => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${booking.services.join(', ')}</td>
+                <td>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                        ${displayServicesWithIcons(booking.services)}
+                    </div>
+                </td>
                 <td>${new Date(booking.date).toLocaleDateString()}</td>
                 <td>${booking.time}</td>
                 <td>${booking.location}</td>
-                <td>$${booking.amount}</td>
+                <td style="font-weight: 600; color: var(--primary);">$${booking.amount}</td>
                 <td><span class="status status-${booking.status}">${booking.status}</span></td>
                 <td>
                     ${booking.status === 'pending' ? 
-                        `<button class="action-btn delete-btn delete-booking" data-id="${booking._id}"><i class="fas fa-trash"></i></button>` : 
+                        `<button class="action-btn delete-btn delete-booking" data-id="${booking._id}" title="Delete Booking"><i class="fas fa-trash"></i></button>` : 
                         ''
                     }
                     ${booking.status === 'confirmed' || booking.status === 'completed' ? 
-                        `<button class="track-btn">Track</button>` : 
+                        `<button class="track-btn" title="Track Booking"><i class="fas fa-map-marker-alt"></i> Track</button>` : 
                         ''
                     }
                 </td>
@@ -3478,22 +3568,28 @@ function renderServices() {
     });
 }
 
-// Render service options in booking form
+// Enhanced render service options with icons
 function renderServiceOptions() {
     serviceOptionsContainer.innerHTML = '';
     
     allServices.forEach(service => {
         const serviceKey = service.name.toLowerCase().replace(/\s+/g, '');
+        const serviceInfo = serviceIcons[serviceKey] || { icon: 'fas fa-camera', color: '#6C757D' };
+        
         const serviceOption = document.createElement('div');
         serviceOption.className = 'service-option';
         serviceOption.setAttribute('data-service', serviceKey);
         serviceOption.setAttribute('data-price', service.price);
         serviceOption.innerHTML = `
-            <input type="checkbox" class="service-checkbox" id="${serviceKey}" name="service" value="${serviceKey}">
+            <input type="checkbox" class="service-checkbox" id="${serviceKey}" name="service" value="${service.name}">
             <div class="service-details">
-                <div class="service-name">${service.name} ${service.isNew ? '<span class="new-badge">NEW</span>' : ''}</div>
+                <div class="service-name">
+                    <i class="${serviceInfo.icon}" style="color: ${serviceInfo.color}; margin-right: 8px;"></i>
+                    ${service.name} 
+                    ${service.isNew ? '<span class="new-badge">NEW</span>' : ''}
+                </div>
                 <div class="service-description">${service.description}</div>
-                <div class="service-price">$${service.price}</div>
+                <div class="service-price" style="color: ${serviceInfo.color}; font-weight: 600;">$${service.price}</div>
             </div>
         `;
         serviceOptionsContainer.appendChild(serviceOption);
@@ -3528,14 +3624,102 @@ function toggleMoreServices() {
     renderServices();
 }
 
-// Calculate total price
-function calculateTotal() {
+// Function to display services with icons
+function displayServicesWithIcons(services) {
+    if (!services || services.length === 0) return '<span style="color: #666;">No services selected</span>';
+    
+    return services.map(service => getServiceIconHTML(service)).join('');
+}
+
+// Function to get service icon HTML
+function getServiceIconHTML(serviceName) {
+    const serviceKey = serviceName.toLowerCase().replace(/\s+/g, '');
+    const serviceInfo = serviceIcons[serviceKey] || { icon: 'fas fa-camera', color: '#6C757D', name: serviceName };
+    
+    return `
+        <span class="service-icon" style="display: inline-flex; align-items: center; margin: 2px 4px 2px 0; padding: 4px 8px; background: ${serviceInfo.color}15; border: 1px solid ${serviceInfo.color}30; border-radius: 12px; font-size: 0.8rem;">
+            <i class="${serviceInfo.icon}" style="color: ${serviceInfo.color}; margin-right: 4px; font-size: 0.7rem;"></i>
+            <span style="color: #333; font-weight: 500;">${serviceInfo.name}</span>
+        </span>
+    `;
+}
+
+// Enhanced function to calculate total amount
+function calculateTotalAmount(selectedServices) {
     let total = 0;
-    document.querySelectorAll('.service-checkbox:checked').forEach(checkbox => {
-        const service = checkbox.value;
-        total += servicePrices[service] || 0;
+    
+    selectedServices.forEach(serviceName => {
+        const serviceKey = serviceName.toLowerCase().replace(/\s+/g, '');
+        const service = allServices.find(s => 
+            s.name.toLowerCase().replace(/\s+/g, '') === serviceKey
+        );
+        
+        if (service) {
+            total += service.price;
+        } else {
+            // Fallback to predefined prices if service not found
+            const fallbackPrices = {
+                'weddingphotography': 500,
+                'photosessions': 200,
+                'photoshoots': 200,
+                'portraits': 200,
+                'programevents': 300,
+                'sponsorshipevents': 150,
+                'eventphotography': 300,
+                'commercialphotography': 400,
+                'familyphotography': 250,
+                'portraitsessions': 200,
+                'corporateevents': 350,
+                'productphotography': 300
+            };
+            
+            total += fallbackPrices[serviceKey] || 0;
+        }
     });
+    
+    return total;
+}
+
+// Enhanced calculateTotal function
+function calculateTotal() {
+    const selectedServices = Array.from(document.querySelectorAll('.service-checkbox:checked'))
+        .map(checkbox => checkbox.value);
+    
+    const total = calculateTotalAmount(selectedServices);
     totalAmount.textContent = total;
+    
+    // Update selected services preview
+    updateSelectedServicesPreview(selectedServices);
+}
+
+// Function to show selected services preview
+function updateSelectedServicesPreview(selectedServices) {
+    let previewContainer = document.getElementById('selected-services-preview');
+    
+    if (!previewContainer) {
+        previewContainer = document.createElement('div');
+        previewContainer.id = 'selected-services-preview';
+        previewContainer.style.marginTop = '1rem';
+        previewContainer.style.padding = '1rem';
+        previewContainer.style.background = '#f8f9fa';
+        previewContainer.style.borderRadius = '8px';
+        previewContainer.style.border = '1px solid #dee2e6';
+        
+        const totalPriceElement = document.querySelector('.total-price');
+        totalPriceElement.parentNode.insertBefore(previewContainer, totalPriceElement);
+    }
+    
+    if (selectedServices.length === 0) {
+        previewContainer.innerHTML = '<p style="color: #666; text-align: center; margin: 0;">No services selected yet</p>';
+        return;
+    }
+    
+    previewContainer.innerHTML = `
+        <div style="margin-bottom: 0.5rem; font-weight: 600; color: #333;">Selected Services:</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+            ${selectedServices.map(service => getServiceIconHTML(service)).join('')}
+        </div>
+    `;
 }
 
 // Load user messages
@@ -3549,1264 +3733,6 @@ async function loadUserMessages() {
 }
 
 // Display user messages
-function displayUserMessages(messages) {
-    messagesList.innerHTML = '';
-    
-    if (messages.length === 0) {
-        messagesList.innerHTML = '<p style="text-align: center; color: #666;">No messages found</p>';
-        return;
-    }
-    
-    messages.forEach(message => {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message-item ${message.status}`;
-        messageDiv.innerHTML = `
-            <button class="delete-message" data-id="${message._id}"><i class="fas fa-trash"></i></button>
-            <p><strong>Message:</strong> ${message.message}</p>
-            <p><strong>Date:</strong> ${new Date(message.date).toLocaleDateString()}</p>
-            <p><strong>Status:</strong> <span style="color: ${message.status === 'solved' ? 'green' : 'red'}">${message.status}</span></p>
-            ${message.adminReply ? `
-                <div style="margin-top: 0.5rem; padding: 0.5rem; background: white; border-radius: 3px;">
-                    <strong>Admin Reply:</strong> ${message.adminReply}
-                </div>
-            ` : ''}
-        `;
-        messagesList.appendChild(messageDiv);
-    });
-    
-    // Add event listeners to delete buttons
-    document.querySelectorAll('.delete-message').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const messageId = this.getAttribute('data-id');
-            deleteUserMessage(messageId);
-        });
-    });
-}
-
-// Delete user message
-async function deleteUserMessage(messageId) {
-    if (confirm('Are you sure you want to delete this message?')) {
-        try {
-            await apiRequest(`/my-messages/${messageId}`, {
-                method: 'DELETE'
-            });
-            loadUserMessages();
-            showToast('Message deleted successfully', 'success');
-        } catch (error) {
-            showToast('Failed to delete message', 'error');
-        }
-    }
-}
-
-// Load admin data
-async function loadAdminData() {
-    try {
-        // Load stats and data
-        const [users, bookings, messages, services, carousel, visits] = await Promise.all([
-            apiRequest('/admin/users'),
-            apiRequest('/admin/bookings'),
-            apiRequest('/admin/messages'),
-            apiRequest('/services'),
-            apiRequest('/carousel'),
-            apiRequest('/visits')
-        ]);
-
-        // Update stats
-        document.getElementById('total-users').textContent = users.length;
-        document.getElementById('total-bookings').textContent = bookings.length;
-        document.getElementById('pending-bookings').textContent = bookings.filter(b => b.status === 'pending').length;
-        document.getElementById('total-revenue').textContent = '$' + bookings.reduce((total, booking) => total + booking.amount, 0);
-        document.getElementById('visit-count').textContent = visits.count;
-        
-        // Load bookings
-        adminBookingsBody.innerHTML = '';
-        bookings.forEach(booking => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${booking.userId ? booking.userId.fullName : 'Unknown User'}</td>
-                <td>${booking.userId ? booking.userId.phone : 'N/A'}</td>
-                <td>${booking.userId ? booking.userId.email : 'N/A'}</td>
-                <td>${booking.services.join(', ')}</td>
-                <td>${new Date(booking.date).toLocaleDateString()}</td>
-                <td>${booking.time}</td>
-                <td>$${booking.amount}</td>
-                <td>
-                    <select class="form-control booking-status" data-id="${booking._id}">
-                        <option value="pending" ${booking.status === 'pending' ? 'selected' : ''}>Pending</option>
-                        <option value="confirmed" ${booking.status === 'confirmed' ? 'selected' : ''}>Confirmed</option>
-                        <option value="completed" ${booking.status === 'completed' ? 'selected' : ''}>Completed</option>
-                        <option value="rejected" ${booking.status === 'rejected' ? 'selected' : ''}>Rejected</option>
-                    </select>
-                </td>
-                <td>
-                    <button class="action-btn delete-btn delete-booking-admin" data-id="${booking._id}"><i class="fas fa-trash"></i></button>
-                </td>
-            `;
-            adminBookingsBody.appendChild(row);
-        });
-        
-        // Load users
-        adminUsersBody.innerHTML = '';
-        users.forEach(user => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${user.fullName}</td>
-                <td>
-                    <input type="email" class="form-control user-email" value="${user.email}" data-id="${user._id}" style="width: 100%;">
-                </td>
-                <td>${user.phone}</td>
-                <td>${user.address}</td>
-                <td>${new Date(user.createdAt).toLocaleDateString()}</td>
-                <td>
-                    <button class="action-btn save-email" data-id="${user._id}"><i class="fas fa-save"></i></button>
-                    <button class="action-btn delete-btn delete-user" data-id="${user._id}"><i class="fas fa-trash"></i></button>
-                </td>
-            `;
-            adminUsersBody.appendChild(row);
-        });
-        
-        // Load messages
-        adminMessagesBody.innerHTML = '';
-        messages.forEach(message => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${message.name}</td>
-                <td>${message.email}</td>
-                <td>${message.phone}</td>
-                <td>${message.message}</td>
-                <td>
-                    <select class="form-control message-status" data-id="${message._id}">
-                        <option value="pending" ${message.status === 'pending' ? 'selected' : ''}>Pending</option>
-                        <option value="solved" ${message.status === 'solved' ? 'selected' : ''}>Solved</option>
-                    </select>
-                </td>
-                <td>
-                    <button class="action-btn reply-message" data-id="${message._id}"><i class="fas fa-reply"></i></button>
-                </td>
-            `;
-            adminMessagesBody.appendChild(row);
-        });
-        
-        // Load services
-        adminServicesBody.innerHTML = '';
-        services.forEach(service => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${service.name}</td>
-                <td>${service.description}</td>
-                <td>$${service.price}</td>
-                <td>${service.isNew ? '<span style="color: red;">NEW</span>' : 'Regular'}</td>
-                <td>
-                    <button class="action-btn delete-btn delete-service" data-id="${service._id}"><i class="fas fa-trash"></i></button>
-                </td>
-            `;
-            adminServicesBody.appendChild(row);
-        });
-        
-        // Load carousel
-        adminCarouselBody.innerHTML = '';
-        carousel.forEach(image => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>
-                    <img src="${image.image}" alt="${image.title}" style="width: 100px; height: 60px; object-fit: cover;">
-                </td>
-                <td>${image.title}</td>
-                <td>${image.description}</td>
-                <td>
-                    <button class="action-btn delete-btn delete-carousel" data-id="${image._id}"><i class="fas fa-trash"></i></button>
-                </td>
-            `;
-            adminCarouselBody.appendChild(row);
-        });
-        
-        // Add event listeners for status changes
-        document.querySelectorAll('.booking-status').forEach(select => {
-            select.addEventListener('change', function() {
-                const bookingId = this.getAttribute('data-id');
-                const newStatus = this.value;
-                updateBookingStatus(bookingId, newStatus);
-            });
-        });
-        
-        document.querySelectorAll('.message-status').forEach(select => {
-            select.addEventListener('change', function() {
-                const messageId = this.getAttribute('data-id');
-                const newStatus = this.value;
-                updateMessageStatus(messageId, newStatus);
-            });
-        });
-        
-        // Add event listeners for reply buttons
-        document.querySelectorAll('.reply-message').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const messageId = this.getAttribute('data-id');
-                const reply = prompt('Enter your reply:');
-                if (reply) {
-                    updateMessageReply(messageId, reply);
-                }
-            });
-        });
-        
-        // Add event listeners for save email buttons
-        document.querySelectorAll('.save-email').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const userId = this.getAttribute('data-id');
-                const emailInput = document.querySelector(`.user-email[data-id="${userId}"]`);
-                const newEmail = emailInput.value;
-                updateUserEmail(userId, newEmail);
-            });
-        });
-        
-        // Add event listeners for admin delete buttons
-        document.querySelectorAll('.delete-booking-admin').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const bookingId = this.getAttribute('data-id');
-                deleteBookingAdmin(bookingId);
-            });
-        });
-        
-        document.querySelectorAll('.delete-user').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const userId = this.getAttribute('data-id');
-                deleteUserAdmin(userId);
-            });
-        });
-        
-        document.querySelectorAll('.delete-service').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const serviceId = this.getAttribute('data-id');
-                deleteService(serviceId);
-            });
-        });
-        
-        document.querySelectorAll('.delete-carousel').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const carouselId = this.getAttribute('data-id');
-                deleteCarousel(carouselId);
-            });
-        });
-    } catch (error) {
-        showToast('Failed to load admin data', 'error');
-    }
-}
-
-// Update booking status
-async function updateBookingStatus(bookingId, newStatus) {
-    try {
-        await apiRequest(`/admin/bookings/${bookingId}`, {
-            method: 'PUT',
-            body: JSON.stringify({ status: newStatus })
-        });
-        showToast('Booking status updated successfully', 'success');
-    } catch (error) {
-        showToast('Failed to update booking status', 'error');
-    }
-}
-
-// Update message status
-async function updateMessageStatus(messageId, newStatus) {
-    try {
-        await apiRequest(`/admin/messages/${messageId}`, {
-            method: 'PUT',
-            body: JSON.stringify({ status: newStatus })
-        });
-        showToast('Message status updated successfully', 'success');
-    } catch (error) {
-        showToast('Failed to update message status', 'error');
-    }
-}
-
-// Update message reply
-async function updateMessageReply(messageId, reply) {
-    try {
-        await apiRequest(`/admin/messages/${messageId}`, {
-            method: 'PUT',
-            body: JSON.stringify({ adminReply: reply, status: 'solved' })
-        });
-        showToast('Reply sent successfully', 'success');
-    } catch (error) {
-        showToast('Failed to send reply', 'error');
-    }
-}
-
-// Update user email
-async function updateUserEmail(userId, email) {
-    try {
-        await apiRequest(`/admin/users/${userId}/email`, {
-            method: 'PUT',
-            body: JSON.stringify({ email })
-        });
-        showToast('User email updated successfully', 'success');
-    } catch (error) {
-        showToast('Failed to update user email', 'error');
-    }
-}
-
-// Delete user (admin)
-async function deleteUserAdmin(userId) {
-    if (confirm('Are you sure you want to delete this user? This will also delete all their bookings and messages.')) {
-        try {
-            await apiRequest(`/admin/users/${userId}`, {
-                method: 'DELETE'
-            });
-            loadAdminData();
-            showToast('User deleted successfully', 'success');
-        } catch (error) {
-            showToast('Failed to delete user', 'error');
-        }
-    }
-}
-
-// Delete booking (admin)
-async function deleteBookingAdmin(bookingId) {
-    if (confirm('Are you sure you want to delete this booking?')) {
-        try {
-            await apiRequest(`/admin/bookings/${bookingId}`, {
-                method: 'DELETE'
-            });
-            loadAdminData();
-            showToast('Booking deleted successfully', 'success');
-        } catch (error) {
-            showToast('Failed to delete booking', 'error');
-        }
-    }
-}
-
-// Delete service
-async function deleteService(serviceId) {
-    if (confirm('Are you sure you want to delete this service?')) {
-        try {
-            await apiRequest(`/admin/services/${serviceId}`, {
-                method: 'DELETE'
-            });
-            loadAdminData();
-            loadServices();
-            showToast('Service deleted successfully', 'success');
-        } catch (error) {
-            showToast('Failed to delete service', 'error');
-        }
-    }
-}
-
-// Delete carousel image
-async function deleteCarousel(carouselId) {
-    if (confirm('Are you sure you want to delete this carousel image?')) {
-        try {
-            await apiRequest(`/admin/carousel/${carouselId}`, {
-                method: 'DELETE'
-            });
-            loadAdminData();
-            loadCarousel();
-            showToast('Carousel image deleted successfully', 'success');
-        } catch (error) {
-            showToast('Failed to delete carousel image', 'error');
-        }
-    }
-}
-
-// Add new service (admin)
-// Add new service (admin) - FIXED VERSION
-// Fixed addNewService function
-async function addNewService() {
-    // Create and trigger file input first (user activation)
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = 'image/*';
-    
-    // First get the image file
-    fileInput.onchange = async (e) => {
-        if (e.target.files.length > 0) {
-            const file = e.target.files[0];
-            
-            // Now get service details after file selection
-            const name = prompt('Enter service name:');
-            if (!name) return;
-            
-            const description = prompt('Enter service description:');
-            if (!description) return;
-            
-            const priceInput = prompt('Enter service price (numbers only):');
-            if (!priceInput) return;
-            
-            // Convert to number and validate
-            const price = parseFloat(priceInput);
-            if (isNaN(price) || price <= 0) {
-                showToast('Please enter a valid price (numbers only)', 'error');
-                return;
-            }
-            
-            const formData = new FormData();
-            formData.append('image', file);
-            formData.append('name', name);
-            formData.append('description', description);
-            formData.append('price', price.toString());
-            
-            try {
-                const response = await fetch(`${API_BASE}/admin/services`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: formData
-                });
-                
-                const data = await response.json();
-                if (response.ok) {
-                    loadAdminData();
-                    loadServices();
-                    showToast('Service added successfully', 'success');
-                } else {
-                    throw new Error(data.error);
-                }
-            } catch (error) {
-                showToast('Failed to add service: ' + error.message, 'error');
-            }
-        }
-    };
-    
-    // Trigger file input immediately after user click
-    fileInput.click();
-}
-// Add carousel image (admin)
-// Enhanced add carousel image function
-async function addCarouselImage() {
-    const title = prompt('Enter image title:');
-    if (!title) return;
-    
-    const description = prompt('Enter image description:');
-    if (!description) return;
-    
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = 'image/*';
-    
-    fileInput.onchange = async (e) => {
-        if (e.target.files.length > 0) {
-            const file = e.target.files[0];
-            
-            // Validate file size (5MB limit)
-            if (file.size > 5 * 1024 * 1024) {
-                showToast('File too large. Maximum size is 5MB.', 'error');
-                return;
-            }
-            
-            // Validate file type
-            if (!file.type.startsWith('image/')) {
-                showToast('Please select an image file.', 'error');
-                return;
-            }
-            
-            const formData = new FormData();
-            formData.append('image', file);
-            formData.append('title', title);
-            formData.append('description', description);
-            
-            try {
-                const response = await fetch('/api/admin/carousel', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: formData
-                });
-                
-                const data = await response.json();
-                if (response.ok) {
-                    loadAdminData();
-                    loadCarousel();
-                    showToast('Carousel image added successfully', 'success');
-                } else {
-                    throw new Error(data.error || 'Failed to upload image');
-                }
-            } catch (error) {
-                showToast(error.message || 'Failed to add carousel image', 'error');
-            }
-        }
-    };
-    
-    fileInput.click();
-}
-
-// Edit profile field
-async function editProfileField(field) {
-    if (field === 'email') {
-        showToast('Email cannot be changed', 'warning');
-        return;
-    }
-    
-    const currentValue = document.getElementById(`profile-${field}`).textContent;
-    const newValue = prompt(`Enter new ${field}:`, currentValue);
-    
-    if (newValue && newValue !== currentValue) {
-        try {
-            const updateData = { [field]: newValue };
-            const response = await fetch(`${API_BASE}/profile`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${authToken}`
-                },
-                body: JSON.stringify(updateData)
-            });
-            
-            const data = await response.json();
-            if (response.ok) {
-                // Update display
-                document.getElementById(`profile-${field}`).textContent = newValue;
-                document.getElementById(`profile-${field}-display`).textContent = newValue;
-                userData[field] = newValue;
-                showToast('Profile updated successfully', 'success');
-            } else {
-                throw new Error(data.error);
-            }
-        } catch (error) {
-            showToast('Failed to update profile', 'error');
-        }
-    }
-}
-
-// Upload profile photo
-async function uploadProfilePhoto(file) {
-    const formData = new FormData();
-    formData.append('profilePhoto', file);
-    formData.append('fullName', userData.fullName);
-    formData.append('address', userData.address);
-    formData.append('phone', userData.phone);
-    
-    try {
-        const response = await fetch(`${API_BASE}/profile`, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            },
-            body: formData
-        });
-        
-        const data = await response.json();
-        if (response.ok) {
-            userData = data.user;
-            updateProfileDisplay();
-            showToast('Profile photo updated successfully', 'success');
-        } else {
-            throw new Error(data.error);
-        }
-    } catch (error) {
-        showToast('Failed to upload photo', 'error');
-    }
-}
-
-// Update profile display
-function updateProfileDisplay() {
-    // Update header profile photo
-    const profilePhoto = document.getElementById('profile-photo');
-    if (userData.profilePhoto) {
-        profilePhoto.src = userData.profilePhoto;
-        profilePhoto.style.display = 'block';
-    } else {
-        profilePhoto.src = 'https://via.placeholder.com/35x35?text=U';
-        profilePhoto.style.display = 'block';
-    }
-    
-    // Update profile section photo
-    if (userData.profilePhoto) {
-        profilePhotoLarge.src = userData.profilePhoto;
-    } else {
-        profilePhotoLarge.src = 'https://via.placeholder.com/120x120?text=No+Photo';
-    }
-}
-
-// Event Listeners
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM loaded, initializing event listeners...');
-    
-    // Navigation links
-    navLinks.forEach(link => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const sectionId = link.getAttribute('data-section');
-            console.log('Nav link clicked:', sectionId);
-            showSection(sectionId);
-        });
-    });
-
-    // Mobile navigation items
-    mobileNavItems.forEach(item => {
-        item.addEventListener('click', (e) => {
-            e.preventDefault();
-            const sectionId = item.getAttribute('data-section');
-            console.log('Mobile nav clicked:', sectionId);
-            showSection(sectionId);
-        });
-    });
-
-    // Carousel controls
-    prevBtn.addEventListener('click', () => {
-        prevSlide();
-        startCarousel();
-    });
-
-    nextBtn.addEventListener('click', () => {
-        nextSlide();
-        startCarousel();
-    });
-
-    // Auto advance carousel
-    startCarousel();
-
-    // Pause carousel on hover
-    carouselInner.addEventListener('mouseenter', stopCarousel);
-    carouselInner.addEventListener('mouseleave', startCarousel);
-
-    // Login form
-    loginForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const email = document.getElementById('login-email').value;
-        const password = document.getElementById('login-password').value;
-        console.log('Login attempt:', email);
-        await login(email, password);
-    });
-
-    // Signup form
-    signupForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const fullName = document.getElementById('signup-name').value;
-        const address = document.getElementById('signup-address').value;
-        const phone = document.getElementById('signup-phone').value;
-        const email = document.getElementById('signup-email').value;
-        const password = document.getElementById('signup-password').value;
-        const confirmPassword = document.getElementById('signup-confirm').value;
-        
-        if (password !== confirmPassword) {
-            showToast('Passwords do not match', 'error');
-            return;
-        }
-        
-        console.log('Signup attempt:', email);
-        
-        try {
-            await apiRequest('/register', {
-                method: 'POST',
-                body: JSON.stringify({
-                    fullName,
-                    email,
-                    password,
-                    address,
-                    phone
-                })
-            });
-            
-            showToast('Account created successfully!', 'success');
-            showSection('login');
-            signupForm.reset();
-        } catch (error) {
-            showToast(error.message || 'Failed to create account', 'error');
-        }
-    });
-
-    // Contact form
-    contactForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const name = document.getElementById('name').value;
-        const email = document.getElementById('email').value;
-        const phone = document.getElementById('phone').value;
-        const message = document.getElementById('message').value;
-        
-        try {
-            await apiRequest('/contact', {
-                method: 'POST',
-                body: JSON.stringify({
-                    name,
-                    email,
-                    phone,
-                    message
-                })
-            });
-            
-            showToast('Message sent successfully!', 'success');
-            contactForm.reset();
-        } catch (error) {
-            showToast('Failed to send message', 'error');
-        }
-    });
-
-    // Booking form
-    bookingForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        if (!userData) {
-            showToast('Please login to book services', 'warning');
-            showSection('login');
-            return;
-        }
-        
-        if (userData.role === 'admin') {
-            showToast('Admin cannot book services', 'warning');
-            return;
-        }
-        
-        const selectedServices = Array.from(document.querySelectorAll('.service-checkbox:checked'))
-            .map(checkbox => checkbox.value);
-        
-        if (selectedServices.length === 0) {
-            showToast('Please select at least one service', 'error');
-            return;
-        }
-        
-        const date = document.getElementById('booking-date').value;
-        const time = document.getElementById('booking-time').value;
-        const location = document.getElementById('booking-location').value;
-        const specialRequests = document.getElementById('special-requests').value;
-        const amount = parseInt(totalAmount.textContent);
-        
-        try {
-            await apiRequest('/bookings', {
-                method: 'POST',
-                body: JSON.stringify({
-                    services: selectedServices,
-                    date,
-                    time,
-                    location,
-                    specialRequests,
-                    amount
-                })
-            });
-            
-            showToast('Booking created successfully!', 'success');
-            bookingForm.reset();
-            calculateTotal();
-            showSection('mybooking');
-        } catch (error) {
-            showToast('Failed to create booking', 'error');
-        }
-    });
-
-    // Admin logout
-    adminLogoutBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        logout();
-    });
-
-    // More services toggle
-    moreServicesBtn.addEventListener('click', toggleMoreServices);
-
-    // My Messages button
-    myMessagesBtn.addEventListener('click', function() {
-        userMessages.style.display = userMessages.style.display === 'none' ? 'block' : 'none';
-        if (userMessages.style.display === 'block') {
-            loadUserMessages();
-        }
-    });
-
-    // Admin navigation
-    adminNavBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const sectionId = this.getAttribute('data-section');
-            
-            // Update active button
-            adminNavBtns.forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
-            
-            // Show corresponding section
-            adminSections.forEach(section => {
-                section.classList.remove('active');
-            });
-            document.getElementById(sectionId).classList.add('active');
-        });
-    });
-
-    // Add service button
-    addServiceBtn.addEventListener('click', addNewService);
-
-    // Add carousel button
-    addCarouselBtn.addEventListener('click', addCarouselImage);
-
-    // Profile photo upload
-    uploadPhotoBtn.addEventListener('click', function() {
-        profilePhotoInput.click();
-    });
-
-    profilePhotoInput.addEventListener('change', async function(e) {
-        if (e.target.files.length > 0) {
-            await uploadProfilePhoto(e.target.files[0]);
-        }
-    });
-
-    // Edit profile buttons
-    editBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const field = this.getAttribute('data-field');
-            if (field) {
-                editProfileField(field);
-            }
-        });
-    });
-
-    // Initialize the app
-    updateProfileDropdown();
-
-    // Check if user was previously logged in
-    const savedToken = sessionStorage.getItem('authToken');
-    if (savedToken) {
-        authToken = savedToken;
-        console.log('Found saved token, verifying...');
-        // Verify token and get user data
-        apiRequest('/profile')
-            .then(profile => {
-                isLoggedIn = true;
-                userData = profile;
-                console.log('User verified:', userData.fullName);
-                if (userData.role === 'admin') {
-                    isAdmin = true;
-                    showAdminPanel();
-                } else {
-                    updateProfileDropdown();
-                }
-            })
-            .catch(() => {
-                // Token is invalid, clear it
-                console.log('Token invalid, clearing...');
-                sessionStorage.removeItem('authToken');
-                authToken = null;
-            });
-    }
-
-    // Load initial data
-    loadServices();
-    loadCarousel();
-    
-    console.log('Event listeners initialized successfully');
-});
-
-
-// Add logout button to profile section
-function addLogoutToProfileSection() {
-    const profileContainer = document.querySelector('.profile-container');
-    if (profileContainer && !document.getElementById('profile-logout-btn')) {
-        const logoutSection = document.createElement('div');
-        logoutSection.style.marginTop = '2rem';
-        logoutSection.style.paddingTop = '2rem';
-        logoutSection.style.borderTop = '2px solid #eee';
-        logoutSection.style.textAlign = 'center';
-        
-        logoutSection.innerHTML = `
-            <h3 style="color: var(--danger); margin-bottom: 1rem;">
-                <i class="fas fa-sign-out-alt" style="margin-right: 10px;"></i>
-                Account Actions
-            </h3>
-            <button id="profile-logout-btn" class="submit-btn" style="background: var(--danger);">
-                <i class="fas fa-sign-out-alt" style="margin-right: 8px;"></i>
-                Logout from Account
-            </button>
-            <p style="color: var(--gray); font-size: 0.9rem; margin-top: 1rem;">
-                You are logged in as: <strong>${userData?.email || 'Unknown'}</strong>
-            </p>
-        `;
-        
-        profileContainer.appendChild(logoutSection);
-        
-        // Add event listener to logout button
-        document.getElementById('profile-logout-btn').addEventListener('click', showLogoutConfirmation);
-    }
-}
-
-// Show attractive logout confirmation
-function showLogoutConfirmation() {
-    // Create modal overlay
-    const modalOverlay = document.createElement('div');
-    modalOverlay.style.position = 'fixed';
-    modalOverlay.style.top = '0';
-    modalOverlay.style.left = '0';
-    modalOverlay.style.width = '100%';
-    modalOverlay.style.height = '100%';
-    modalOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-    modalOverlay.style.display = 'flex';
-    modalOverlay.style.justifyContent = 'center';
-    modalOverlay.style.alignItems = 'center';
-    modalOverlay.style.zIndex = '2000';
-    modalOverlay.style.backdropFilter = 'blur(5px)';
-    
-    // Create modal content
-    const modalContent = document.createElement('div');
-    modalContent.style.background = 'linear-gradient(135deg, #fff, #f8f9fa)';
-    modalContent.style.padding = '2.5rem';
-    modalContent.style.borderRadius = '15px';
-    modalContent.style.boxShadow = '0 20px 40px rgba(0, 0, 0, 0.3)';
-    modalContent.style.maxWidth = '450px';
-    modalContent.style.width = '90%';
-    modalContent.style.textAlign = 'center';
-    modalContent.style.border = '2px solid var(--danger)';
-    modalContent.style.position = 'relative';
-    
-    modalContent.innerHTML = `
-        <div style="margin-bottom: 1.5rem;">
-            <div style="width: 80px; height: 80px; background: var(--danger); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; border: 4px solid #ffebee;">
-                <i class="fas fa-sign-out-alt" style="font-size: 2rem; color: white;"></i>
-            </div>
-            <h2 style="color: var(--danger); margin-bottom: 0.5rem; font-family: \'Playfair Display\', serif;">Logout Confirmation</h2>
-            <p style="color: var(--gray); margin-bottom: 0.5rem;">Are you sure you want to logout?</p>
-            <p style="color: var(--dark); font-weight: 600; background: #fff3cd; padding: 0.8rem; border-radius: 8px; border-left: 4px solid var(--warning);">
-                <i class="fas fa-envelope" style="margin-right: 8px; color: var(--warning);"></i>
-                ${userData?.email || 'Unknown Email'}
-            </p>
-        </div>
-        
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 2rem;">
-            <button id="confirm-logout" style="background: var(--danger); color: white; border: none; padding: 1rem 1.5rem; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                <i class="fas fa-check" style="margin-right: 8px;"></i>
-                Yes, Logout
-            </button>
-            <button id="cancel-logout" style="background: var(--secondary); color: white; border: none; padding: 1rem 1.5rem; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
-                <i class="fas fa-times" style="margin-right: 8px;"></i>
-                Cancel
-            </button>
-        </div>
-        
-        <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #eee;">
-            <p style="color: var(--gray); font-size: 0.8rem;">
-                <i class="fas fa-info-circle" style="margin-right: 5px;"></i>
-                You can login again anytime with your email and password
-            </p>
-        </div>
-    `;
-    
-    modalOverlay.appendChild(modalContent);
-    document.body.appendChild(modalOverlay);
-    
-    // Add hover effects
-    const confirmBtn = document.getElementById('confirm-logout');
-    const cancelBtn = document.getElementById('cancel-logout');
-    
-    confirmBtn.addEventListener('mouseenter', () => {
-        confirmBtn.style.transform = 'translateY(-2px)';
-        confirmBtn.style.boxShadow = '0 5px 15px rgba(239, 71, 111, 0.4)';
-    });
-    
-    confirmBtn.addEventListener('mouseleave', () => {
-        confirmBtn.style.transform = 'translateY(0)';
-        confirmBtn.style.boxShadow = 'none';
-    });
-    
-    cancelBtn.addEventListener('mouseenter', () => {
-        cancelBtn.style.transform = 'translateY(-2px)';
-        cancelBtn.style.boxShadow = '0 5px 15px rgba(78, 205, 196, 0.4)';
-    });
-    
-    cancelBtn.addEventListener('mouseleave', () => {
-        cancelBtn.style.transform = 'translateY(0)';
-        cancelBtn.style.boxShadow = 'none';
-    });
-    
-    // Add event listeners
-    confirmBtn.addEventListener('click', () => {
-        document.body.removeChild(modalOverlay);
-        logout();
-    });
-    
-    cancelBtn.addEventListener('click', () => {
-        document.body.removeChild(modalOverlay);
-        showToast('Logout cancelled', 'info');
-    });
-    
-    // Close modal when clicking outside
-    modalOverlay.addEventListener('click', (e) => {
-        if (e.target === modalOverlay) {
-            document.body.removeChild(modalOverlay);
-            showToast('Logout cancelled', 'info');
-        }
-    });
-    
-    // Add escape key listener
-    const escapeHandler = (e) => {
-        if (e.key === 'Escape') {
-            document.body.removeChild(modalOverlay);
-            document.removeEventListener('keydown', escapeHandler);
-            showToast('Logout cancelled', 'info');
-        }
-    };
-    document.addEventListener('keydown', escapeHandler);
-}
-
-// Update showSection function to include logout button in profile section
-const originalShowSection = showSection;
-showSection = function(sectionId) {
-    originalShowSection(sectionId);
-    
-    // Add logout button to profile section when it's shown
-    if (sectionId === 'profile' && isLoggedIn) {
-        setTimeout(addLogoutToProfileSection, 100);
-    }
-};
-
-// Update login function to handle profile section updates
-const originalLogin = login;
-login = async function(email, password) {
-    await originalLogin(email, password);
-    
-    // Add logout button to profile section if we're on profile page
-    if (isLoggedIn && currentSection === 'profile') {
-        setTimeout(addLogoutToProfileSection, 100);
-    }
-};
-
-// Initialize logout button if already on profile section after page load
-document.addEventListener('DOMContentLoaded', function() {
-    // Check if we're on profile section and logged in
-    setTimeout(() => {
-        if (isLoggedIn && currentSection === 'profile') {
-            addLogoutToProfileSection();
-        }
-    }, 500);
-});
-
-// Enhanced logout function with better feedback
-const originalLogout = logout;
-logout = function() {
-    // Remove logout button from profile section if it exists
-    const profileLogoutBtn = document.getElementById('profile-logout-btn');
-    if (profileLogoutBtn) {
-        profileLogoutBtn.closest('div').remove();
-    }
-    
-    originalLogout();
-    
-    // Show enhanced logout message
-    setTimeout(() => {
-        showToast('You have been successfully logged out. We hope to see you again soon!', 'info');
-    }, 1000);
-};
-
-console.log('Logout functionality enhanced with profile section integration');
-
-// Website Visit Counter
-let visitCounted = false;
-
-function countWebsiteVisit() {
-    // Check if we've already counted a visit in this session
-    if (visitCounted) return;
-    
-    // Check if we've counted a visit today
-    const lastVisitDate = localStorage.getItem('lastVisitDate');
-    const today = new Date().toDateString();
-    
-    // Only count if it's a new day or first visit
-    if (!lastVisitDate || lastVisitDate !== today) {
-        fetch('/api/visits', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            console.log('Visit counted:', data);
-            // Mark visit as counted for this session
-            visitCounted = true;
-            // Store today's date to prevent multiple counts per day
-            localStorage.setItem('lastVisitDate', today);
-        })
-        .catch(error => {
-            console.error('Error counting visit:', error);
-        });
-    } else {
-        visitCounted = true;
-    }
-}
-
-// Count visit when page loads
-document.addEventListener('DOMContentLoaded', function() {
-    countWebsiteVisit();
-});
-
-// Count visit when page becomes visible again (if user returns to tab)
-document.addEventListener('visibilitychange', function() {
-    if (!document.hidden && !visitCounted) {
-        countWebsiteVisit();
-    }
-});
-
-
-
-// Fix for undefined phone and address in admin panel
-function updateAdminPanelUserData() {
-    // Update user data in admin panel when profile is updated
-    if (isAdmin && currentSection === 'admin') {
-        loadAdminData();
-    }
-}
-
-// Enhanced user profile update function
-async function updateUserProfile(field, value) {
-    try {
-        const updateData = { [field]: value };
-        const response = await fetch(`${API_BASE}/profile`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify(updateData)
-        });
-        
-        const data = await response.json();
-        if (response.ok) {
-            // Update local user data
-            userData[field] = value;
-            
-            // Update display in profile section
-            document.getElementById(`profile-${field}`).textContent = value;
-            document.getElementById(`profile-${field}-display`).textContent = value;
-            
-            // Update admin panel if user is admin
-            updateAdminPanelUserData();
-            
-            showToast('Profile updated successfully', 'success');
-            return true;
-        } else {
-            throw new Error(data.error);
-        }
-    } catch (error) {
-        showToast('Failed to update profile', 'error');
-        return false;
-    }
-}
-
-// Enhanced edit profile field function
-async function editProfileField(field) {
-    if (field === 'email') {
-        showToast('Email cannot be changed', 'warning');
-        return;
-    }
-    
-    const currentValue = document.getElementById(`profile-${field}`).textContent;
-    const newValue = prompt(`Enter new ${field}:`, currentValue);
-    
-    if (newValue && newValue !== currentValue) {
-        await updateUserProfile(field, newValue);
-    }
-}
-
-// Fix for signup form - ensure phone and address are included
-function validateSignupForm() {
-    const fullName = document.getElementById('signup-name').value.trim();
-    const address = document.getElementById('signup-address').value.trim();
-    const phone = document.getElementById('signup-phone').value.trim();
-    const email = document.getElementById('signup-email').value.trim();
-    const password = document.getElementById('signup-password').value;
-    const confirmPassword = document.getElementById('signup-confirm').value;
-    
-    // Validate required fields
-    if (!fullName || !address || !phone || !email || !password || !confirmPassword) {
-        showToast('Please fill in all required fields', 'error');
-        return false;
-    }
-    
-    // Validate phone format (basic validation)
-    const phoneRegex = /^[\d\s\-\+\(\)]{10,}$/;
-    if (!phoneRegex.test(phone)) {
-        showToast('Please enter a valid phone number', 'error');
-        return false;
-    }
-    
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-        showToast('Please enter a valid email address', 'error');
-        return false;
-    }
-    
-    // Validate password match
-    if (password !== confirmPassword) {
-        showToast('Passwords do not match', 'error');
-        return false;
-    }
-    
-    // Validate password length
-    if (password.length < 6) {
-        showToast('Password must be at least 6 characters long', 'error');
-        return false;
-    }
-    
-    return true;
-}
-
-// Enhanced signup form submission
-signupForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    if (!validateSignupForm()) {
-        return;
-    }
-    
-    const fullName = document.getElementById('signup-name').value.trim();
-    const address = document.getElementById('signup-address').value.trim();
-    const phone = document.getElementById('signup-phone').value.trim();
-    const email = document.getElementById('signup-email').value.trim();
-    const password = document.getElementById('signup-password').value;
-    
-    console.log('Signup attempt:', { fullName, email, phone, address });
-    
-    try {
-        const data = await apiRequest('/register', {
-            method: 'POST',
-            body: JSON.stringify({
-                fullName,
-                email,
-                password,
-                address,
-                phone
-            })
-        });
-        
-        showToast('Account created successfully! Please login.', 'success');
-        signupForm.reset();
-        showSection('login');
-    } catch (error) {
-        showToast(error.message || 'Failed to create account', 'error');
-    }
-});
-
-// Fix for toast messages - ensure only one shows at a time
-let currentToast = null;
-
-function showToast(message, type = 'info') {
-    // Remove existing toast if present
-    if (currentToast) {
-        currentToast.remove();
-        currentToast = null;
-    }
-    
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    
-    let icon = 'fas fa-info-circle';
-    if (type === 'success') icon = 'fas fa-check-circle';
-    if (type === 'error') icon = 'fas fa-exclamation-circle';
-    if (type === 'warning') icon = 'fas fa-exclamation-triangle';
-    
-    toast.innerHTML = `
-        <i class="${icon}"></i>
-        <span>${message}</span>
-    `;
-    
-    toastContainer.appendChild(toast);
-    currentToast = toast;
-    
-    setTimeout(() => {
-        toast.classList.add('show');
-    }, 100);
-    
-    setTimeout(() => {
-        toast.classList.remove('show');
-        setTimeout(() => {
-            if (toast.parentNode) {
-                toast.remove();
-            }
-            currentToast = null;
-        }, 300);
-    }, 2000);
-}
-
-// Fix for empty messages display
 function displayUserMessages(messages) {
     messagesList.innerHTML = '';
     
@@ -4990,435 +3916,261 @@ function displayUserMessages(messages) {
     });
 }
 
-// Enhanced contact form validation
-function validateContactForm() {
-    const name = document.getElementById('name').value.trim();
-    const email = document.getElementById('email').value.trim();
-    const phone = document.getElementById('phone').value.trim();
-    const message = document.getElementById('message').value.trim();
-    
-    if (!name || !email || !phone || !message) {
-        showToast('Please fill in all fields', 'error');
-        return false;
+// Delete user message
+async function deleteUserMessage(messageId) {
+    if (confirm('Are you sure you want to delete this message?')) {
+        try {
+            await apiRequest(`/my-messages/${messageId}`, {
+                method: 'DELETE'
+            });
+            loadUserMessages();
+            showToast('Message deleted successfully', 'success');
+        } catch (error) {
+            showToast('Failed to delete message', 'error');
+        }
     }
-    
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-        showToast('Please enter a valid email address', 'error');
-        return false;
-    }
-    
-    // Validate phone format
-    const phoneRegex = /^[\d\s\-\+\(\)]{10,}$/;
-    if (!phoneRegex.test(phone)) {
-        showToast('Please enter a valid phone number', 'error');
-        return false;
-    }
-    
-    // Validate message length
-    if (message.length < 10) {
-        showToast('Please enter a more detailed message (at least 10 characters)', 'error');
-        return false;
-    }
-    
-    return true;
 }
 
-// Enhanced contact form submission
-contactForm.addEventListener('submit', async (e) => {
+// Enhanced booking form submission with loading state
+async function submitBookingFormWithValidation(e) {
     e.preventDefault();
     
-    if (!validateContactForm()) {
+    if (!userData) {
+        showToast('Please login to book services', 'warning');
+        showSection('login');
         return;
     }
     
-    const name = document.getElementById('name').value.trim();
-    const email = document.getElementById('email').value.trim();
-    const phone = document.getElementById('phone').value.trim();
-    const message = document.getElementById('message').value.trim();
+    if (userData.role === 'admin') {
+        showToast('Admin cannot book services', 'warning');
+        return;
+    }
+    
+    const selectedServices = Array.from(document.querySelectorAll('.service-checkbox:checked'))
+        .map(checkbox => checkbox.value);
+    
+    if (selectedServices.length === 0) {
+        showToast('Please select at least one service', 'error');
+        return;
+    }
+    
+    const date = document.getElementById('booking-date').value;
+    const time = document.getElementById('booking-time').value;
+    const location = document.getElementById('booking-location').value;
+    const specialRequests = document.getElementById('special-requests').value;
+    
+    // Calculate amount using the enhanced function
+    const amount = calculateTotalAmount(selectedServices);
+    
+    if (amount <= 0) {
+        showToast('Invalid service selection. Please try again.', 'error');
+        return;
+    }
     
     // Show loading state
-    const submitBtn = contactForm.querySelector('.submit-btn');
+    const submitBtn = bookingForm.querySelector('.submit-btn');
     const originalText = submitBtn.textContent;
-    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Booking...';
     submitBtn.disabled = true;
     
     try {
-        await apiRequest('/contact', {
+        await apiRequest('/bookings', {
             method: 'POST',
             body: JSON.stringify({
-                name,
-                email,
-                phone,
-                message
+                services: selectedServices,
+                date,
+                time,
+                location,
+                specialRequests,
+                amount
             })
         });
         
-        showToast('Message sent successfully! We will get back to you soon.', 'success');
-        contactForm.reset();
-        
-        // Reload messages if messages section is open
-        if (userMessages.style.display === 'block') {
-            loadUserMessages();
-        }
+        showToast('Booking created successfully!', 'success');
+        bookingForm.reset();
+        calculateTotal(); // Reset the total display
+        showSection('mybooking');
     } catch (error) {
-        showToast('Failed to send message. Please try again.', 'error');
+        showToast('Failed to create booking: ' + (error.message || 'Please try again'), 'error');
     } finally {
         // Restore button state
         submitBtn.textContent = originalText;
         submitBtn.disabled = false;
     }
-});
-
-// Enhanced admin panel user data display
-function displayAdminUsers(users) {
-    adminUsersBody.innerHTML = '';
-    
-    if (!users || users.length === 0) {
-        adminUsersBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem;">No users found</td></tr>';
-        return;
-    }
-    
-    users.forEach(user => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${user.fullName || 'Unknown'}</td>
-            <td>
-                <input type="email" class="form-control user-email" value="${user.email || ''}" data-id="${user._id}" style="width: 100%;">
-            </td>
-            <td>${user.phone || 'Not provided'}</td>
-            <td>${user.address || 'Not provided'}</td>
-            <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Unknown'}</td>
-            <td>
-                <button class="action-btn save-email" data-id="${user._id}" title="Save Email">
-                    <i class="fas fa-save"></i>
-                </button>
-                <button class="action-btn delete-btn delete-user" data-id="${user._id}" title="Delete User">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </td>
-        `;
-        adminUsersBody.appendChild(row);
-    });
 }
 
-// Initialize enhanced functionality
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Enhanced functionality loaded');
-    
-    // Ensure phone and address fields are properly handled in signup
-    const signupPhone = document.getElementById('signup-phone');
-    const signupAddress = document.getElementById('signup-address');
-    
-    if (signupPhone) {
-        signupPhone.placeholder = 'Enter your phone number';
-        signupPhone.required = true;
-    }
-    
-    if (signupAddress) {
-        signupAddress.placeholder = 'Enter your full address';
-        signupAddress.required = true;
-    }
-    
-    // Add input validation for phone fields
-    const phoneInputs = document.querySelectorAll('input[type="tel"]');
-    phoneInputs.forEach(input => {
-        input.addEventListener('input', function(e) {
-            // Allow only numbers, spaces, hyphens, parentheses, and plus sign
-            this.value = this.value.replace(/[^\d\s\-\+\(\)]/g, '');
-        });
-    });
-});
-
-// Enhanced error handling for API requests
-async function apiRequest(url, options = {}) {
+// Load admin data
+async function loadAdminData() {
     try {
-        const response = await fetch(`${API_BASE}${url}`, {
-            headers: {
-                'Content-Type': 'application/json',
-                ...(authToken && { 'Authorization': `Bearer ${authToken}` }),
-                ...options.headers
-            },
-            ...options
+        // Load stats and data
+        const [users, bookings, messages, services, carousel, visits] = await Promise.all([
+            apiRequest('/admin/users'),
+            apiRequest('/admin/bookings'),
+            apiRequest('/admin/messages'),
+            apiRequest('/services'),
+            apiRequest('/carousel'),
+            apiRequest('/visits')
+        ]);
+
+        // Update stats
+        document.getElementById('total-users').textContent = users.length;
+        document.getElementById('total-bookings').textContent = bookings.length;
+        document.getElementById('pending-bookings').textContent = bookings.filter(b => b.status === 'pending').length;
+        document.getElementById('total-revenue').textContent = '$' + bookings.reduce((total, booking) => total + booking.amount, 0);
+        document.getElementById('visit-count').textContent = visits.count;
+        
+        // Load bookings with icons
+        loadAdminBookingsWithIcons(bookings);
+        
+        // Load users
+        adminUsersBody.innerHTML = '';
+        users.forEach(user => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${user.fullName}</td>
+                <td>
+                    <input type="email" class="form-control user-email" value="${user.email}" data-id="${user._id}" style="width: 100%;">
+                </td>
+                <td>${user.phone}</td>
+                <td>${user.address}</td>
+                <td>${new Date(user.createdAt).toLocaleDateString()}</td>
+                <td>
+                    <button class="action-btn save-email" data-id="${user._id}"><i class="fas fa-save"></i></button>
+                    <button class="action-btn delete-btn delete-user" data-id="${user._id}"><i class="fas fa-trash"></i></button>
+                </td>
+            `;
+            adminUsersBody.appendChild(row);
         });
-
-        const data = await response.json();
         
-        if (!response.ok) {
-            // Handle specific error cases
-            if (response.status === 401) {
-                // Token expired or invalid
-                sessionStorage.removeItem('authToken');
-                authToken = null;
-                isLoggedIn = false;
-                userData = null;
-                updateProfileDropdown();
-                showToast('Session expired. Please login again.', 'error');
-                showSection('login');
-            }
-            throw new Error(data.error || `Server error: ${response.status}`);
-        }
+        // Load messages
+        adminMessagesBody.innerHTML = '';
+        messages.forEach(message => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${message.name}</td>
+                <td>${message.email}</td>
+                <td>${message.phone}</td>
+                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${message.message}</td>
+                <td>
+                    <select class="form-control message-status" data-id="${message._id}">
+                        <option value="pending" ${message.status === 'pending' ? 'selected' : ''}>Pending</option>
+                        <option value="solved" ${message.status === 'solved' ? 'selected' : ''}>Solved</option>
+                    </select>
+                </td>
+                <td>
+                    <button class="action-btn reply-message" data-id="${message._id}"><i class="fas fa-reply"></i></button>
+                </td>
+            `;
+            adminMessagesBody.appendChild(row);
+        });
         
-        return data;
-    } catch (error) {
-        console.error('API Request failed:', error);
-        
-        // Show user-friendly error messages
-        if (error.message.includes('Failed to fetch')) {
-            showToast('Network error. Please check your connection.', 'error');
-        } else if (error.message.includes('Server error')) {
-            showToast('Server is temporarily unavailable. Please try again later.', 'error');
-        } else {
-            showToast(error.message || 'Something went wrong', 'error');
-        }
-        
-        throw error;
-    }
-}
-
-console.log('Enhanced fixes loaded successfully');
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Enhanced service icons mapping
-const serviceIcons = {
-    'weddingphotography': { icon: 'fas fa-ring', color: '#FF6B6B', name: 'Wedding Photography' },
-    'photosessions': { icon: 'fas fa-camera', color: '#4ECDC4', name: 'Photo Sessions' },
-    'portraits': { icon: 'fas fa-user', color: '#4ECDC4', name: 'Portrait' },
-    'photoshoots': { icon: 'fas fa-camera-retro', color: '#4ECDC4', name: 'Photo Shoots' },
-    'programevents': { icon: 'fas fa-calendar-alt', color: '#FFD166', name: 'Program Events' },
-    'sponsorshipevents': { icon: 'fas fa-handshake', color: '#06D6A0', name: 'Sponsorship Events' },
-    'eventphotography': { icon: 'fas fa-calendar-check', color: '#FFD166', name: 'Event Photography' },
-    'commercialphotography': { icon: 'fas fa-briefcase', color: '#2196F3', name: 'Commercial Photography' },
-    'familyphotography': { icon: 'fas fa-users', color: '#4ECDC4', name: 'Family Photography' },
-    'portraitsessions': { icon: 'fas fa-portrait', color: '#4ECDC4', name: 'Portrait Sessions' },
-    'corporateevents': { icon: 'fas fa-building', color: '#2196F3', name: 'Corporate Events' },
-    'productphotography': { icon: 'fas fa-box', color: '#2196F3', name: 'Product Photography' }
-};
-
-// Function to get service icon HTML
-function getServiceIconHTML(serviceName) {
-    const serviceKey = serviceName.toLowerCase().replace(/\s+/g, '');
-    const serviceInfo = serviceIcons[serviceKey] || { icon: 'fas fa-camera', color: '#6C757D', name: serviceName };
-    
-    return `
-        <span class="service-icon" style="display: inline-flex; align-items: center; margin: 2px 4px 2px 0; padding: 4px 8px; background: ${serviceInfo.color}15; border: 1px solid ${serviceInfo.color}30; border-radius: 12px; font-size: 0.8rem;">
-            <i class="${serviceInfo.icon}" style="color: ${serviceInfo.color}; margin-right: 4px; font-size: 0.7rem;"></i>
-            <span style="color: #333; font-weight: 500;">${serviceInfo.name}</span>
-        </span>
-    `;
-}
-
-// Function to display services with icons
-function displayServicesWithIcons(services) {
-    if (!services || services.length === 0) return '<span style="color: #666;">No services selected</span>';
-    
-    return services.map(service => getServiceIconHTML(service)).join('');
-}
-
-// Enhanced function to calculate total amount
-function calculateTotalAmount(selectedServices) {
-    let total = 0;
-    
-    selectedServices.forEach(serviceName => {
-        const serviceKey = serviceName.toLowerCase().replace(/\s+/g, '');
-        const service = allServices.find(s => 
-            s.name.toLowerCase().replace(/\s+/g, '') === serviceKey
-        );
-        
-        if (service) {
-            total += service.price;
-        } else {
-            // Fallback to predefined prices if service not found
-            const fallbackPrices = {
-                'weddingphotography': 500,
-                'photosessions': 200,
-                'photoshoots': 200,
-                'portraits': 200,
-                'programevents': 300,
-                'sponsorshipevents': 150,
-                'eventphotography': 300,
-                'commercialphotography': 400,
-                'familyphotography': 250,
-                'portraitsessions': 200,
-                'corporateevents': 350,
-                'productphotography': 300
-            };
+        // Load services
+        adminServicesBody.innerHTML = '';
+        services.forEach(service => {
+            const serviceKey = service.name.toLowerCase().replace(/\s+/g, '');
+            const serviceInfo = serviceIcons[serviceKey] || { icon: 'fas fa-camera', color: '#6C757D' };
             
-            total += fallbackPrices[serviceKey] || 0;
-        }
-    });
-    
-    return total;
-}
-
-// Enhanced renderServiceOptions function with icons
-function renderServiceOptionsWithIcons() {
-    serviceOptionsContainer.innerHTML = '';
-    
-    allServices.forEach(service => {
-        const serviceKey = service.name.toLowerCase().replace(/\s+/g, '');
-        const serviceInfo = serviceIcons[serviceKey] || { icon: 'fas fa-camera', color: '#6C757D' };
-        
-        const serviceOption = document.createElement('div');
-        serviceOption.className = 'service-option';
-        serviceOption.setAttribute('data-service', serviceKey);
-        serviceOption.setAttribute('data-price', service.price);
-        serviceOption.innerHTML = `
-            <input type="checkbox" class="service-checkbox" id="${serviceKey}" name="service" value="${service.name}">
-            <div class="service-details">
-                <div class="service-name">
-                    <i class="${serviceInfo.icon}" style="color: ${serviceInfo.color}; margin-right: 8px;"></i>
-                    ${service.name} 
-                    ${service.isNew ? '<span class="new-badge">NEW</span>' : ''}
-                </div>
-                <div class="service-description">${service.description}</div>
-                <div class="service-price" style="color: ${serviceInfo.color}; font-weight: 600;">$${service.price}</div>
-            </div>
-        `;
-        serviceOptionsContainer.appendChild(serviceOption);
-    });
-    
-    // Add event listeners to service options
-    document.querySelectorAll('.service-option').forEach(option => {
-        option.addEventListener('click', (e) => {
-            if (e.target.type !== 'checkbox') {
-                const checkbox = option.querySelector('.service-checkbox');
-                checkbox.checked = !checkbox.checked;
-                option.classList.toggle('selected', checkbox.checked);
-                calculateTotal();
-            }
-        });
-        
-        const checkbox = option.querySelector('.service-checkbox');
-        checkbox.addEventListener('change', () => {
-            option.classList.toggle('selected', checkbox.checked);
-            calculateTotal();
-        });
-    });
-}
-
-// Enhanced calculateTotal function
-function calculateTotal() {
-    const selectedServices = Array.from(document.querySelectorAll('.service-checkbox:checked'))
-        .map(checkbox => checkbox.value);
-    
-    const total = calculateTotalAmount(selectedServices);
-    totalAmount.textContent = total;
-    
-    // Update selected services preview
-    updateSelectedServicesPreview(selectedServices);
-}
-
-// Function to show selected services preview
-function updateSelectedServicesPreview(selectedServices) {
-    let previewContainer = document.getElementById('selected-services-preview');
-    
-    if (!previewContainer) {
-        previewContainer = document.createElement('div');
-        previewContainer.id = 'selected-services-preview';
-        previewContainer.style.marginTop = '1rem';
-        previewContainer.style.padding = '1rem';
-        previewContainer.style.background = '#f8f9fa';
-        previewContainer.style.borderRadius = '8px';
-        previewContainer.style.border = '1px solid #dee2e6';
-        
-        const totalPriceElement = document.querySelector('.total-price');
-        totalPriceElement.parentNode.insertBefore(previewContainer, totalPriceElement);
-    }
-    
-    if (selectedServices.length === 0) {
-        previewContainer.innerHTML = '<p style="color: #666; text-align: center; margin: 0;">No services selected yet</p>';
-        return;
-    }
-    
-    previewContainer.innerHTML = `
-        <div style="margin-bottom: 0.5rem; font-weight: 600; color: #333;">Selected Services:</div>
-        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-            ${selectedServices.map(service => getServiceIconHTML(service)).join('')}
-        </div>
-    `;
-}
-
-// Enhanced loadUserBookings function with icons
-async function loadUserBookingsWithIcons() {
-    if (!userData) return;
-    
-    try {
-        const bookings = await apiRequest('/my-bookings');
-        bookingsBody.innerHTML = '';
-        
-        if (bookings.length === 0) {
-            bookingsBody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem; color: #666;">No bookings found. <a href="#" class="nav-link" data-section="booking-form" style="color: var(--primary);">Book your first session!</a></td></tr>';
-            return;
-        }
-        
-        bookings.forEach(booking => {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>
-                    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-                        ${displayServicesWithIcons(booking.services)}
-                    </div>
+                    <i class="${serviceInfo.icon}" style="color: ${serviceInfo.color}; margin-right: 8px;"></i>
+                    ${service.name}
                 </td>
-                <td>${new Date(booking.date).toLocaleDateString()}</td>
-                <td>${booking.time}</td>
-                <td>${booking.location}</td>
-                <td style="font-weight: 600; color: var(--primary);">$${booking.amount}</td>
-                <td><span class="status status-${booking.status}">${booking.status}</span></td>
+                <td>${service.description}</td>
+                <td style="font-weight: 600; color: var(--primary);">$${service.price}</td>
+                <td>${service.isNew ? '<span style="color: red; font-weight: 600;">NEW</span>' : 'Regular'}</td>
                 <td>
-                    ${booking.status === 'pending' ? 
-                        `<button class="action-btn delete-btn delete-booking" data-id="${booking._id}" title="Delete Booking"><i class="fas fa-trash"></i></button>` : 
-                        ''
-                    }
-                    ${booking.status === 'confirmed' || booking.status === 'completed' ? 
-                        `<button class="track-btn" title="Track Booking"><i class="fas fa-map-marker-alt"></i> Track</button>` : 
-                        ''
-                    }
+                    <button class="action-btn delete-btn delete-service" data-id="${service._id}"><i class="fas fa-trash"></i></button>
                 </td>
             `;
-            bookingsBody.appendChild(row);
+            adminServicesBody.appendChild(row);
         });
         
-        // Add event listeners to delete buttons
-        document.querySelectorAll('.delete-booking').forEach(btn => {
-            btn.addEventListener('click', function() {
+        // Load carousel
+        adminCarouselBody.innerHTML = '';
+        carousel.forEach(image => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>
+                    <img src="${image.image}" alt="${image.title}" style="width: 100px; height: 60px; object-fit: cover; border-radius: 4px;">
+                </td>
+                <td>${image.title}</td>
+                <td>${image.description}</td>
+                <td>
+                    <button class="action-btn delete-btn delete-carousel" data-id="${image._id}"><i class="fas fa-trash"></i></button>
+                </td>
+            `;
+            adminCarouselBody.appendChild(row);
+        });
+        
+        // Add event listeners for status changes
+        document.querySelectorAll('.booking-status').forEach(select => {
+            select.addEventListener('change', function() {
                 const bookingId = this.getAttribute('data-id');
-                deleteBooking(bookingId);
+                const newStatus = this.value;
+                updateBookingStatus(bookingId, newStatus);
             });
         });
         
-        // Add event listeners to track buttons
-        document.querySelectorAll('.track-btn').forEach(btn => {
+        document.querySelectorAll('.message-status').forEach(select => {
+            select.addEventListener('change', function() {
+                const messageId = this.getAttribute('data-id');
+                const newStatus = this.value;
+                updateMessageStatus(messageId, newStatus);
+            });
+        });
+        
+        // Add event listeners for reply buttons
+        document.querySelectorAll('.reply-message').forEach(btn => {
             btn.addEventListener('click', function() {
-                showToast('Please contact us for tracking details', 'info');
+                const messageId = this.getAttribute('data-id');
+                const reply = prompt('Enter your reply:');
+                if (reply) {
+                    updateMessageReply(messageId, reply);
+                }
+            });
+        });
+        
+        // Add event listeners for save email buttons
+        document.querySelectorAll('.save-email').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const userId = this.getAttribute('data-id');
+                const emailInput = document.querySelector(`.user-email[data-id="${userId}"]`);
+                const newEmail = emailInput.value;
+                updateUserEmail(userId, newEmail);
+            });
+        });
+        
+        // Add event listeners for admin delete buttons
+        document.querySelectorAll('.delete-booking-admin').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const bookingId = this.getAttribute('data-id');
+                deleteBookingAdmin(bookingId);
+            });
+        });
+        
+        document.querySelectorAll('.delete-user').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const userId = this.getAttribute('data-id');
+                deleteUserAdmin(userId);
+            });
+        });
+        
+        document.querySelectorAll('.delete-service').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const serviceId = this.getAttribute('data-id');
+                deleteService(serviceId);
+            });
+        });
+        
+        document.querySelectorAll('.delete-carousel').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const carouselId = this.getAttribute('data-id');
+                deleteCarousel(carouselId);
             });
         });
     } catch (error) {
-        showToast('Failed to load bookings', 'error');
+        showToast('Failed to load admin data', 'error');
     }
 }
 
@@ -5458,294 +4210,836 @@ function loadAdminBookingsWithIcons(bookings) {
     });
 }
 
-// Enhanced booking form submission with amount validation
-async function submitBookingFormWithValidation(e) {
-    e.preventDefault();
-    
-    if (!userData) {
-        showToast('Please login to book services', 'warning');
-        showSection('login');
-        return;
-    }
-    
-    if (userData.role === 'admin') {
-        showToast('Admin cannot book services', 'warning');
-        return;
-    }
-    
-    const selectedServices = Array.from(document.querySelectorAll('.service-checkbox:checked'))
-        .map(checkbox => checkbox.value);
-    
-    if (selectedServices.length === 0) {
-        showToast('Please select at least one service', 'error');
-        return;
-    }
-    
-    const date = document.getElementById('booking-date').value;
-    const time = document.getElementById('booking-time').value;
-    const location = document.getElementById('booking-location').value;
-    const specialRequests = document.getElementById('special-requests').value;
-    
-    // Calculate amount using the enhanced function
-    const amount = calculateTotalAmount(selectedServices);
-    
-    if (amount <= 0) {
-        showToast('Invalid service selection. Please try again.', 'error');
-        return;
-    }
-    
+// Update booking status
+async function updateBookingStatus(bookingId, newStatus) {
     try {
-        await apiRequest('/bookings', {
-            method: 'POST',
-            body: JSON.stringify({
-                services: selectedServices,
-                date,
-                time,
-                location,
-                specialRequests,
-                amount
-            })
+        await apiRequest(`/admin/bookings/${bookingId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: newStatus })
         });
-        
-        showToast('Booking created successfully!', 'success');
-        bookingForm.reset();
-        calculateTotal(); // Reset the total display
-        showSection('mybooking');
+        showToast('Booking status updated successfully', 'success');
     } catch (error) {
-        showToast('Failed to create booking: ' + (error.message || 'Please try again'), 'error');
+        showToast('Failed to update booking status', 'error');
     }
 }
 
-// Replace the original functions with enhanced versions
-function replaceFunctionsWithEnhancedVersions() {
-    // Replace service options rendering
-    const originalRenderServiceOptions = renderServiceOptions;
-    renderServiceOptions = renderServiceOptionsWithIcons;
-    
-    // Replace bookings loading
-    const originalLoadUserBookings = loadUserBookings;
-    loadUserBookings = loadUserBookingsWithIcons;
-    
-    // Replace booking form submission
-    const originalBookingFormSubmit = bookingForm.addEventListener;
-    bookingForm.removeEventListener('submit', bookingForm.__originalSubmitHandler);
-    bookingForm.addEventListener('submit', submitBookingFormWithValidation);
-    bookingForm.__originalSubmitHandler = submitBookingFormWithValidation;
-    
-    // Replace admin bookings loading in loadAdminData
-    const originalLoadAdminData = loadAdminData;
-    loadAdminData = async function() {
-        try {
-            const [users, bookings, messages, services, carousel, visits] = await Promise.all([
-                apiRequest('/admin/users'),
-                apiRequest('/admin/bookings'),
-                apiRequest('/admin/messages'),
-                apiRequest('/services'),
-                apiRequest('/carousel'),
-                apiRequest('/visits')
-            ]);
+// Update message status
+async function updateMessageStatus(messageId, newStatus) {
+    try {
+        await apiRequest(`/admin/messages/${messageId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: newStatus })
+        });
+        showToast('Message status updated successfully', 'success');
+    } catch (error) {
+        showToast('Failed to update message status', 'error');
+    }
+}
 
-            // Update stats
-            document.getElementById('total-users').textContent = users.length;
-            document.getElementById('total-bookings').textContent = bookings.length;
-            document.getElementById('pending-bookings').textContent = bookings.filter(b => b.status === 'pending').length;
-            document.getElementById('total-revenue').textContent = '$' + bookings.reduce((total, booking) => total + booking.amount, 0);
-            document.getElementById('visit-count').textContent = visits.count;
-            
-            // Load bookings with icons
-            loadAdminBookingsWithIcons(bookings);
-            
-            // Rest of the original loadAdminData function remains the same...
-            // [Keep the original code for users, messages, services, carousel loading]
-            
-            // Load users
-            adminUsersBody.innerHTML = '';
-            users.forEach(user => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${user.fullName}</td>
-                    <td>
-                        <input type="email" class="form-control user-email" value="${user.email}" data-id="${user._id}" style="width: 100%;">
-                    </td>
-                    <td>${user.phone}</td>
-                    <td>${user.address}</td>
-                    <td>${new Date(user.createdAt).toLocaleDateString()}</td>
-                    <td>
-                        <button class="action-btn save-email" data-id="${user._id}"><i class="fas fa-save"></i></button>
-                        <button class="action-btn delete-btn delete-user" data-id="${user._id}"><i class="fas fa-trash"></i></button>
-                    </td>
-                `;
-                adminUsersBody.appendChild(row);
+// Update message reply
+async function updateMessageReply(messageId, reply) {
+    try {
+        await apiRequest(`/admin/messages/${messageId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ adminReply: reply, status: 'solved' })
+        });
+        showToast('Reply sent successfully', 'success');
+    } catch (error) {
+        showToast('Failed to send reply', 'error');
+    }
+}
+
+// Update user email
+async function updateUserEmail(userId, email) {
+    try {
+        await apiRequest(`/admin/users/${userId}/email`, {
+            method: 'PUT',
+            body: JSON.stringify({ email })
+        });
+        showToast('User email updated successfully', 'success');
+    } catch (error) {
+        showToast('Failed to update user email', 'error');
+    }
+}
+
+// Delete user (admin)
+async function deleteUserAdmin(userId) {
+    if (confirm('Are you sure you want to delete this user? This will also delete all their bookings and messages.')) {
+        try {
+            await apiRequest(`/admin/users/${userId}`, {
+                method: 'DELETE'
             });
-            
-            // Load messages
-            adminMessagesBody.innerHTML = '';
-            messages.forEach(message => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${message.name}</td>
-                    <td>${message.email}</td>
-                    <td>${message.phone}</td>
-                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${message.message}</td>
-                    <td>
-                        <select class="form-control message-status" data-id="${message._id}">
-                            <option value="pending" ${message.status === 'pending' ? 'selected' : ''}>Pending</option>
-                            <option value="solved" ${message.status === 'solved' ? 'selected' : ''}>Solved</option>
-                        </select>
-                    </td>
-                    <td>
-                        <button class="action-btn reply-message" data-id="${message._id}"><i class="fas fa-reply"></i></button>
-                    </td>
-                `;
-                adminMessagesBody.appendChild(row);
-            });
-            
-            // Load services
-            adminServicesBody.innerHTML = '';
-            services.forEach(service => {
-                const serviceKey = service.name.toLowerCase().replace(/\s+/g, '');
-                const serviceInfo = serviceIcons[serviceKey] || { icon: 'fas fa-camera', color: '#6C757D' };
-                
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>
-                        <i class="${serviceInfo.icon}" style="color: ${serviceInfo.color}; margin-right: 8px;"></i>
-                        ${service.name}
-                    </td>
-                    <td>${service.description}</td>
-                    <td style="font-weight: 600; color: var(--primary);">$${service.price}</td>
-                    <td>${service.isNew ? '<span style="color: red; font-weight: 600;">NEW</span>' : 'Regular'}</td>
-                    <td>
-                        <button class="action-btn delete-btn delete-service" data-id="${service._id}"><i class="fas fa-trash"></i></button>
-                    </td>
-                `;
-                adminServicesBody.appendChild(row);
-            });
-            
-            // Load carousel
-            adminCarouselBody.innerHTML = '';
-            carousel.forEach(image => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>
-                        <img src="${image.image}" alt="${image.title}" style="width: 100px; height: 60px; object-fit: cover; border-radius: 4px;">
-                    </td>
-                    <td>${image.title}</td>
-                    <td>${image.description}</td>
-                    <td>
-                        <button class="action-btn delete-btn delete-carousel" data-id="${image._id}"><i class="fas fa-trash"></i></button>
-                    </td>
-                `;
-                adminCarouselBody.appendChild(row);
-            });
-            
-            // Add event listeners (keep the original event listener code)
-            document.querySelectorAll('.booking-status').forEach(select => {
-                select.addEventListener('change', function() {
-                    const bookingId = this.getAttribute('data-id');
-                    const newStatus = this.value;
-                    updateBookingStatus(bookingId, newStatus);
-                });
-            });
-            
-            document.querySelectorAll('.message-status').forEach(select => {
-                select.addEventListener('change', function() {
-                    const messageId = this.getAttribute('data-id');
-                    const newStatus = this.value;
-                    updateMessageStatus(messageId, newStatus);
-                });
-            });
-            
-            document.querySelectorAll('.reply-message').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const messageId = this.getAttribute('data-id');
-                    const reply = prompt('Enter your reply:');
-                    if (reply) {
-                        updateMessageReply(messageId, reply);
-                    }
-                });
-            });
-            
-            document.querySelectorAll('.save-email').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const userId = this.getAttribute('data-id');
-                    const emailInput = document.querySelector(`.user-email[data-id="${userId}"]`);
-                    const newEmail = emailInput.value;
-                    updateUserEmail(userId, newEmail);
-                });
-            });
-            
-            document.querySelectorAll('.delete-booking-admin').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const bookingId = this.getAttribute('data-id');
-                    deleteBookingAdmin(bookingId);
-                });
-            });
-            
-            document.querySelectorAll('.delete-user').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const userId = this.getAttribute('data-id');
-                    deleteUserAdmin(userId);
-                });
-            });
-            
-            document.querySelectorAll('.delete-service').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const serviceId = this.getAttribute('data-id');
-                    deleteService(serviceId);
-                });
-            });
-            
-            document.querySelectorAll('.delete-carousel').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const carouselId = this.getAttribute('data-id');
-                    deleteCarousel(carouselId);
-                });
-            });
-            
+            loadAdminData();
+            showToast('User deleted successfully', 'success');
         } catch (error) {
-            showToast('Failed to load admin data', 'error');
+            showToast('Failed to delete user', 'error');
+        }
+    }
+}
+
+// Delete booking (admin)
+async function deleteBookingAdmin(bookingId) {
+    if (confirm('Are you sure you want to delete this booking?')) {
+        try {
+            await apiRequest(`/admin/bookings/${bookingId}`, {
+                method: 'DELETE'
+            });
+            loadAdminData();
+            showToast('Booking deleted successfully', 'success');
+        } catch (error) {
+            showToast('Failed to delete booking', 'error');
+        }
+    }
+}
+
+// Delete service
+async function deleteService(serviceId) {
+    if (confirm('Are you sure you want to delete this service?')) {
+        try {
+            await apiRequest(`/admin/services/${serviceId}`, {
+                method: 'DELETE'
+            });
+            loadAdminData();
+            loadServices();
+            showToast('Service deleted successfully', 'success');
+        } catch (error) {
+            showToast('Failed to delete service', 'error');
+        }
+    }
+}
+
+// Delete carousel image
+async function deleteCarousel(carouselId) {
+    if (confirm('Are you sure you want to delete this carousel image?')) {
+        try {
+            await apiRequest(`/admin/carousel/${carouselId}`, {
+                method: 'DELETE'
+            });
+            loadAdminData();
+            loadCarousel();
+            showToast('Carousel image deleted successfully', 'success');
+        } catch (error) {
+            showToast('Failed to delete carousel image', 'error');
+        }
+    }
+}
+
+// Add new service (admin)
+async function addNewService() {
+    const name = prompt('Enter service name:');
+    if (!name) return;
+    
+    const description = prompt('Enter service description:');
+    if (!description) return;
+    
+    const price = prompt('Enter service price:');
+    if (!price || isNaN(price)) {
+        showToast('Please enter a valid price', 'error');
+        return;
+    }
+    
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    
+    fileInput.onchange = async (e) => {
+        if (e.target.files.length > 0) {
+            const formData = new FormData();
+            formData.append('image', e.target.files[0]);
+            formData.append('name', name);
+            formData.append('description', description);
+            formData.append('price', price);
+            
+            try {
+                const response = await fetch(`/api/admin/services`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: formData
+                });
+                
+                const data = await response.json();
+                if (response.ok) {
+                    loadAdminData();
+                    loadServices();
+                    showToast('Service added successfully', 'success');
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                showToast('Failed to add service', 'error');
+            }
         }
     };
+    
+    fileInput.click();
 }
 
-// Initialize enhanced functionality
-document.addEventListener('DOMContentLoaded', function() {
-    // Replace functions after DOM is loaded
-    setTimeout(replaceFunctionsWithEnhancedVersions, 1000);
+// Add carousel image (admin)
+async function addCarouselImage() {
+    const title = prompt('Enter image title:');
+    if (!title) return;
     
-    // Add CSS for service icons
-    const style = document.createElement('style');
-    style.textContent = `
-        .service-icon {
-            transition: all 0.3s ease;
+    const description = prompt('Enter image description:');
+    if (!description) return;
+    
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    
+    fileInput.onchange = async (e) => {
+        if (e.target.files.length > 0) {
+            const formData = new FormData();
+            formData.append('image', e.target.files[0]);
+            formData.append('title', title);
+            formData.append('description', description);
+            
+            try {
+                const response = await fetch(`/api/admin/carousel`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: formData
+                });
+                
+                const data = await response.json();
+                if (response.ok) {
+                    loadAdminData();
+                    loadCarousel();
+                    showToast('Carousel image added successfully', 'success');
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                showToast('Failed to add carousel image', 'error');
+            }
         }
+    };
+    
+    fileInput.click();
+}
+
+// Edit profile field
+async function editProfileField(field) {
+    if (field === 'email') {
+        showToast('Email cannot be changed', 'warning');
+        return;
+    }
+    
+    const currentValue = document.getElementById(`profile-${field}`).textContent;
+    const newValue = prompt(`Enter new ${field}:`, currentValue);
+    
+    if (newValue && newValue !== currentValue) {
+        try {
+            const updateData = { [field]: newValue };
+            const response = await fetch(`/api/profile`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify(updateData)
+            });
+            
+            const data = await response.json();
+            if (response.ok) {
+                // Update display
+                document.getElementById(`profile-${field}`).textContent = newValue;
+                document.getElementById(`profile-${field}-display`).textContent = newValue;
+                userData[field] = newValue;
+                showToast('Profile updated successfully', 'success');
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (error) {
+            showToast('Failed to update profile', 'error');
+        }
+    }
+}
+
+// Upload profile photo
+async function uploadProfilePhoto(file) {
+    const formData = new FormData();
+    formData.append('profilePhoto', file);
+    formData.append('fullName', userData.fullName);
+    formData.append('address', userData.address);
+    formData.append('phone', userData.phone);
+    
+    try {
+        const response = await fetch(`/api/profile`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: formData
+        });
         
-        .service-icon:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        const data = await response.json();
+        if (response.ok) {
+            userData = data.user;
+            updateProfileDisplay();
+            showToast('Profile photo updated successfully', 'success');
+        } else {
+            throw new Error(data.error);
         }
+    } catch (error) {
+        showToast('Failed to upload photo', 'error');
+    }
+}
+
+// Update profile display
+function updateProfileDisplay() {
+    // Update header profile photo
+    const profilePhoto = document.getElementById('profile-photo');
+    if (userData.profilePhoto) {
+        profilePhoto.src = userData.profilePhoto;
+        profilePhoto.style.display = 'block';
+    } else {
+        profilePhoto.src = 'https://via.placeholder.com/35x35?text=U';
+        profilePhoto.style.display = 'block';
+    }
+    
+    // Update profile section photo
+    if (userData.profilePhoto) {
+        profilePhotoLarge.src = userData.profilePhoto;
+    } else {
+        profilePhotoLarge.src = 'https://via.placeholder.com/120x120?text=No+Photo';
+    }
+}
+
+// Enhanced signup form validation
+function validateSignupForm() {
+    const fullName = document.getElementById('signup-name').value.trim();
+    const address = document.getElementById('signup-address').value.trim();
+    const phone = document.getElementById('signup-phone').value.trim();
+    const email = document.getElementById('signup-email').value.trim();
+    const password = document.getElementById('signup-password').value;
+    const confirmPassword = document.getElementById('signup-confirm').value;
+    
+    // Validate required fields
+    if (!fullName || !address || !phone || !email || !password || !confirmPassword) {
+        showToast('Please fill in all required fields', 'error');
+        return false;
+    }
+    
+    // Validate phone format (basic validation)
+    const phoneRegex = /^[\d\s\-\+\(\)]{10,}$/;
+    if (!phoneRegex.test(phone)) {
+        showToast('Please enter a valid phone number', 'error');
+        return false;
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        showToast('Please enter a valid email address', 'error');
+        return false;
+    }
+    
+    // Validate password match
+    if (password !== confirmPassword) {
+        showToast('Passwords do not match', 'error');
+        return false;
+    }
+    
+    // Validate password length
+    if (password.length < 6) {
+        showToast('Password must be at least 6 characters long', 'error');
+        return false;
+    }
+    
+    return true;
+}
+
+// Enhanced contact form validation
+function validateContactForm() {
+    const name = document.getElementById('name').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const phone = document.getElementById('phone').value.trim();
+    const message = document.getElementById('message').value.trim();
+    
+    if (!name || !email || !phone || !message) {
+        showToast('Please fill in all fields', 'error');
+        return false;
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        showToast('Please enter a valid email address', 'error');
+        return false;
+    }
+    
+    // Validate phone format
+    const phoneRegex = /^[\d\s\-\+\(\)]{10,}$/;
+    if (!phoneRegex.test(phone)) {
+        showToast('Please enter a valid phone number', 'error');
+        return false;
+    }
+    
+    // Validate message length
+    if (message.length < 10) {
+        showToast('Please enter a more detailed message (at least 10 characters)', 'error');
+        return false;
+    }
+    
+    return true;
+}
+
+// Add logout button to profile section
+function addLogoutToProfileSection() {
+    const profileContainer = document.querySelector('.profile-container');
+    if (profileContainer && !document.getElementById('profile-logout-btn')) {
+        const logoutSection = document.createElement('div');
+        logoutSection.style.marginTop = '2rem';
+        logoutSection.style.paddingTop = '2rem';
+        logoutSection.style.borderTop = '2px solid #eee';
+        logoutSection.style.textAlign = 'center';
         
-        .service-option.selected {
-            border-color: var(--primary);
-            background: rgba(255, 107, 107, 0.05);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(255, 107, 107, 0.15);
-        }
+        logoutSection.innerHTML = `
+            <h3 style="color: var(--danger); margin-bottom: 1rem;">
+                <i class="fas fa-sign-out-alt" style="margin-right: 10px;"></i>
+                Account Actions
+            </h3>
+            <button id="profile-logout-btn" class="submit-btn" style="background: var(--danger);">
+                <i class="fas fa-sign-out-alt" style="margin-right: 8px;"></i>
+                Logout from Account
+            </button>
+            <p style="color: var(--gray); font-size: 0.9rem; margin-top: 1rem;">
+                You are logged in as: <strong>${userData?.email || 'Unknown'}</strong>
+            </p>
+        `;
         
-        .service-option {
-            transition: all 0.3s ease;
-        }
+        profileContainer.appendChild(logoutSection);
         
-        .service-option:hover {
-            border-color: var(--primary);
-            transform: translateY(-1px);
-        }
+        // Add event listener to logout button
+        document.getElementById('profile-logout-btn').addEventListener('click', showLogoutConfirmation);
+    }
+}
+
+// Show attractive logout confirmation
+function showLogoutConfirmation() {
+    // Create modal overlay
+    const modalOverlay = document.createElement('div');
+    modalOverlay.style.position = 'fixed';
+    modalOverlay.style.top = '0';
+    modalOverlay.style.left = '0';
+    modalOverlay.style.width = '100%';
+    modalOverlay.style.height = '100%';
+    modalOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    modalOverlay.style.display = 'flex';
+    modalOverlay.style.justifyContent = 'center';
+    modalOverlay.style.alignItems = 'center';
+    modalOverlay.style.zIndex = '2000';
+    modalOverlay.style.backdropFilter = 'blur(5px)';
+    
+    // Create modal content
+    const modalContent = document.createElement('div');
+    modalContent.style.background = 'linear-gradient(135deg, #fff, #f8f9fa)';
+    modalContent.style.padding = '2.5rem';
+    modalContent.style.borderRadius = '15px';
+    modalContent.style.boxShadow = '0 20px 40px rgba(0, 0, 0, 0.3)';
+    modalContent.style.maxWidth = '450px';
+    modalContent.style.width = '90%';
+    modalContent.style.textAlign = 'center';
+    modalContent.style.border = '2px solid var(--danger)';
+    modalContent.style.position = 'relative';
+    
+    modalContent.innerHTML = `
+        <div style="margin-bottom: 1.5rem;">
+            <div style="width: 80px; height: 80px; background: var(--danger); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; border: 4px solid #ffebee;">
+                <i class="fas fa-sign-out-alt" style="font-size: 2rem; color: white;"></i>
+            </div>
+            <h2 style="color: var(--danger); margin-bottom: 0.5rem; font-family: 'Playfair Display', serif;">Logout Confirmation</h2>
+            <p style="color: var(--gray); margin-bottom: 0.5rem;">Are you sure you want to logout?</p>
+            <p style="color: var(--dark); font-weight: 600; background: #fff3cd; padding: 0.8rem; border-radius: 8px; border-left: 4px solid var(--warning);">
+                <i class="fas fa-envelope" style="margin-right: 8px; color: var(--warning);"></i>
+                ${userData?.email || 'Unknown Email'}
+            </p>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 2rem;">
+            <button id="confirm-logout" style="background: var(--danger); color: white; border: none; padding: 1rem 1.5rem; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                <i class="fas fa-check" style="margin-right: 8px;"></i>
+                Yes, Logout
+            </button>
+            <button id="cancel-logout" style="background: var(--secondary); color: white; border: none; padding: 1rem 1.5rem; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                <i class="fas fa-times" style="margin-right: 8px;"></i>
+                Cancel
+            </button>
+        </div>
+        
+        <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #eee;">
+            <p style="color: var(--gray); font-size: 0.8rem;">
+                <i class="fas fa-info-circle" style="margin-right: 5px;"></i>
+                You can login again anytime with your email and password
+            </p>
+        </div>
     `;
-    document.head.appendChild(style);
+    
+    modalOverlay.appendChild(modalContent);
+    document.body.appendChild(modalOverlay);
+    
+    // Add hover effects
+    const confirmBtn = document.getElementById('confirm-logout');
+    const cancelBtn = document.getElementById('cancel-logout');
+    
+    confirmBtn.addEventListener('mouseenter', () => {
+        confirmBtn.style.transform = 'translateY(-2px)';
+        confirmBtn.style.boxShadow = '0 5px 15px rgba(239, 71, 111, 0.4)';
+    });
+    
+    confirmBtn.addEventListener('mouseleave', () => {
+        confirmBtn.style.transform = 'translateY(0)';
+        confirmBtn.style.boxShadow = 'none';
+    });
+    
+    cancelBtn.addEventListener('mouseenter', () => {
+        cancelBtn.style.transform = 'translateY(-2px)';
+        cancelBtn.style.boxShadow = '0 5px 15px rgba(78, 205, 196, 0.4)';
+    });
+    
+    cancelBtn.addEventListener('mouseleave', () => {
+        cancelBtn.style.transform = 'translateY(0)';
+        cancelBtn.style.boxShadow = 'none';
+    });
+    
+    // Add event listeners
+    confirmBtn.addEventListener('click', () => {
+        document.body.removeChild(modalOverlay);
+        logout();
+    });
+    
+    cancelBtn.addEventListener('click', () => {
+        document.body.removeChild(modalOverlay);
+        showToast('Logout cancelled', 'info');
+    });
+    
+    // Close modal when clicking outside
+    modalOverlay.addEventListener('click', (e) => {
+        if (e.target === modalOverlay) {
+            document.body.removeChild(modalOverlay);
+            showToast('Logout cancelled', 'info');
+        }
+    });
+    
+    // Add escape key listener
+    const escapeHandler = (e) => {
+        if (e.key === 'Escape') {
+            document.body.removeChild(modalOverlay);
+            document.removeEventListener('keydown', escapeHandler);
+            showToast('Logout cancelled', 'info');
+        }
+    };
+    document.addEventListener('keydown', escapeHandler);
+}
+
+// Website Visit Counter
+let visitCounted = false;
+
+function countWebsiteVisit() {
+    // Check if we've already counted a visit in this session
+    if (visitCounted) return;
+    
+    // Check if we've counted a visit today
+    const lastVisitDate = localStorage.getItem('lastVisitDate');
+    const today = new Date().toDateString();
+    
+    // Only count if it's a new day or first visit
+    if (!lastVisitDate || lastVisitDate !== today) {
+        fetch('/api/visits', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Visit counted:', data);
+            // Mark visit as counted for this session
+            visitCounted = true;
+            // Store today's date to prevent multiple counts per day
+            localStorage.setItem('lastVisitDate', today);
+        })
+        .catch(error => {
+            console.error('Error counting visit:', error);
+        });
+    } else {
+        visitCounted = true;
+    }
+}
+
+// Event Listeners
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, initializing event listeners...');
+    
+    // Check for saved login on page load
+    checkSavedLogin();
+    
+    // Count visit when page loads
+    countWebsiteVisit();
+    
+    // Count visit when page becomes visible again (if user returns to tab)
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden && !visitCounted) {
+            countWebsiteVisit();
+        }
+    });
+    
+    // Navigation links
+    navLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const sectionId = link.getAttribute('data-section');
+            console.log('Nav link clicked:', sectionId);
+            showSection(sectionId);
+        });
+    });
+
+    // Mobile navigation items
+    mobileNavItems.forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            const sectionId = item.getAttribute('data-section');
+            console.log('Mobile nav clicked:', sectionId);
+            showSection(sectionId);
+        });
+    });
+
+    // Carousel controls
+    prevBtn.addEventListener('click', () => {
+        prevSlide();
+        startCarousel();
+    });
+
+    nextBtn.addEventListener('click', () => {
+        nextSlide();
+        startCarousel();
+    });
+
+    // Auto advance carousel
+    startCarousel();
+
+    // Pause carousel on hover
+    carouselInner.addEventListener('mouseenter', stopCarousel);
+    carouselInner.addEventListener('mouseleave', startCarousel);
+
+    // Login form
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+        console.log('Login attempt:', email);
+        await login(email, password);
+    });
+
+    // Signup form
+    signupForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        if (!validateSignupForm()) {
+            return;
+        }
+        
+        const fullName = document.getElementById('signup-name').value.trim();
+        const address = document.getElementById('signup-address').value.trim();
+        const phone = document.getElementById('signup-phone').value.trim();
+        const email = document.getElementById('signup-email').value.trim();
+        const password = document.getElementById('signup-password').value;
+        
+        console.log('Signup attempt:', { fullName, email, phone, address });
+        
+        try {
+            const data = await apiRequest('/register', {
+                method: 'POST',
+                body: JSON.stringify({
+                    fullName,
+                    email,
+                    password,
+                    address,
+                    phone
+                })
+            });
+            
+            // Auto-login after successful registration
+            isLoggedIn = true;
+            userData = data.user;
+            authToken = data.token;
+            localStorage.setItem('authToken', authToken);
+            
+            showToast('Account created successfully!', 'success');
+            signupForm.reset();
+            updateProfileDropdown();
+            showSection('home');
+        } catch (error) {
+            showToast(error.message || 'Failed to create account', 'error');
+        }
+    });
+
+    // Contact form
+    contactForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        if (!validateContactForm()) {
+            return;
+        }
+        
+        const name = document.getElementById('name').value.trim();
+        const email = document.getElementById('email').value.trim();
+        const phone = document.getElementById('phone').value.trim();
+        const message = document.getElementById('message').value.trim();
+        
+        // Show loading state
+        const submitBtn = contactForm.querySelector('.submit-btn');
+        const originalText = submitBtn.textContent;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+        submitBtn.disabled = true;
+        
+        try {
+            await apiRequest('/contact', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name,
+                    email,
+                    phone,
+                    message
+                })
+            });
+            
+            showToast('Message sent successfully! We will get back to you soon.', 'success');
+            contactForm.reset();
+            
+            // Reload messages if messages section is open
+            if (userMessages.style.display === 'block') {
+                loadUserMessages();
+            }
+        } catch (error) {
+            showToast('Failed to send message. Please try again.', 'error');
+        } finally {
+            // Restore button state
+            submitBtn.textContent = originalText;
+            submitBtn.disabled = false;
+        }
+    });
+
+    // Booking form
+    bookingForm.addEventListener('submit', submitBookingFormWithValidation);
+
+    // Admin logout
+    adminLogoutBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        logout();
+    });
+
+    // More services toggle
+    moreServicesBtn.addEventListener('click', toggleMoreServices);
+
+    // My Messages button
+    myMessagesBtn.addEventListener('click', function() {
+        userMessages.style.display = userMessages.style.display === 'none' ? 'block' : 'none';
+        if (userMessages.style.display === 'block') {
+            loadUserMessages();
+        }
+    });
+
+    // Admin navigation
+    adminNavBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const sectionId = this.getAttribute('data-section');
+            
+            // Update active button
+            adminNavBtns.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            
+            // Show corresponding section
+            adminSections.forEach(section => {
+                section.classList.remove('active');
+            });
+            document.getElementById(sectionId).classList.add('active');
+        });
+    });
+
+    // Add service button
+    addServiceBtn.addEventListener('click', addNewService);
+
+    // Add carousel button
+    addCarouselBtn.addEventListener('click', addCarouselImage);
+
+    // Profile photo upload
+    uploadPhotoBtn.addEventListener('click', function() {
+        profilePhotoInput.click();
+    });
+
+    profilePhotoInput.addEventListener('change', async function(e) {
+        if (e.target.files.length > 0) {
+            await uploadProfilePhoto(e.target.files[0]);
+        }
+    });
+
+    // Edit profile buttons
+    editBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const field = this.getAttribute('data-field');
+            if (field) {
+                editProfileField(field);
+            }
+        });
+    });
+
+    // Update showSection function to include logout button in profile section
+    const originalShowSection = showSection;
+    showSection = function(sectionId) {
+        originalShowSection(sectionId);
+        
+        // Add logout button to profile section when it's shown
+        if (sectionId === 'profile' && isLoggedIn) {
+            setTimeout(addLogoutToProfileSection, 100);
+        }
+    };
+
+    // Initialize the app
+    updateProfileDropdown();
+
+    // Load initial data
+    loadServices();
+    loadCarousel();
+    
+    console.log('Event listeners initialized successfully');
 });
 
-console.log('Enhanced booking system with icons loaded successfully!');
+// Add CSS for service icons
+const serviceIconsStyle = document.createElement('style');
+serviceIconsStyle.textContent = `
+    .service-icon {
+        transition: all 0.3s ease;
+    }
+    
+    .service-icon:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .service-option.selected {
+        border-color: var(--primary);
+        background: rgba(255, 107, 107, 0.05);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(255, 107, 107, 0.15);
+    }
+    
+    .service-option {
+        transition: all 0.3s ease;
+    }
+    
+    .service-option:hover {
+        border-color: var(--primary);
+        transform: translateY(-1px);
+    }
+`;
+document.head.appendChild(serviceIconsStyle);
+
+console.log('Complete JavaScript loaded successfully!');
 </script>
     
 </body>
