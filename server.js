@@ -15,7 +15,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'photographer_app_secret_key_2024';
 // Environment variables for production
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/photographer_app';
 const EMAIL_USER = process.env.EMAIL_USER || 'abhishekrajbanshi999@gmail.com';
-const EMAIL_PASS = process.env.EMAIL_PASS || 'your_app_password_here';
+const EMAIL_PASS = process.env.EMAIL_PASS || 'krfotyhksoxsoynf';
 
 // Middleware
 app.use(cors());
