@@ -131,7 +131,7 @@ const upload = multer({
 // Email transporter configuration (with better error handling)
 let transporter;
 try {
-    transporter = nodemailer.createTransporter({
+    transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
             user: EMAIL_USER,
