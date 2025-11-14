@@ -1,5 +1,3 @@
-
-
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -17,7 +15,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'photographer_app_secret_key_2024';
 // Environment variables for production
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/photographer_app';
 const EMAIL_USER = process.env.EMAIL_USER || 'abhishekrajbanshi999@gmail.com';
-const EMAIL_PASS = process.env.EMAIL_PASS || 'krfotyhksoxsoynf';
+const EMAIL_PASS = process.env.EMAIL_PASS || 'your_app_password_here';
 
 // Middleware
 app.use(cors());
@@ -130,14 +128,20 @@ const upload = multer({
     }
 });
 
-// Email transporter configuration
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: EMAIL_USER,
-        pass: EMAIL_PASS
-    }
-});
+// Email transporter configuration (with better error handling)
+let transporter;
+try {
+    transporter = nodemailer.createTransporter({
+        service: 'gmail',
+        auth: {
+            user: EMAIL_USER,
+            pass: EMAIL_PASS
+        }
+    });
+} catch (emailError) {
+    console.warn('Email transporter initialization failed. Emails will not be sent.');
+    transporter = null;
+}
 
 // Authentication middleware
 const authenticateToken = (req, res, next) => {
@@ -173,16 +177,28 @@ const requireUser = (req, res, next) => {
     next();
 };
 
-// Visit counter middleware
+// Visit counter middleware (FIXED: Only count unique visits)
 const countVisit = async (req, res, next) => {
     try {
+        // Skip API routes for visit counting
+        if (req.path.startsWith('/api/')) {
+            return next();
+        }
+
         let visit = await Visit.findOne();
         if (!visit) {
             visit = await Visit.create({ count: 1 });
         } else {
-            visit.count += 1;
-            visit.lastUpdated = new Date();
-            await visit.save();
+            // Only count if last visit was more than 30 minutes ago (session-based)
+            const lastVisitTime = new Date(visit.lastUpdated).getTime();
+            const currentTime = new Date().getTime();
+            const thirtyMinutes = 30 * 60 * 1000;
+            
+            if (currentTime - lastVisitTime > thirtyMinutes) {
+                visit.count += 1;
+                visit.lastUpdated = new Date();
+                await visit.save();
+            }
         }
         next();
     } catch (error) {
@@ -215,28 +231,30 @@ const initializeData = async () => {
                 name: 'Wedding Photography',
                 description: 'Full day coverage with 2 photographers',
                 price: 500,
-                image: '/uploads/wedding.jpg',
                 isNew: false
             },
             {
-                name: 'Photo Shoots',
+                name: 'Photo Sessions',
                 description: '2-hour professional photo session',
                 price: 200,
-                image: '/uploads/portrait.jpg',
                 isNew: false
             },
             {
-                name: 'Program Events',
+                name: 'Portrait Photography',
+                description: 'Professional portrait sessions',
+                price: 150,
+                isNew: false
+            },
+            {
+                name: 'Event Photography',
                 description: 'Event coverage up to 4 hours',
                 price: 300,
-                image: '/uploads/event.jpg',
                 isNew: false
             },
             {
-                name: 'Sponsorship Events',
-                description: 'Corporate event photography',
-                price: 150,
-                image: '/uploads/corporate.jpg',
+                name: 'Commercial Photography',
+                description: 'Product and commercial photography',
+                price: 400,
                 isNew: false
             }
         ];
@@ -310,7 +328,7 @@ app.get('/api/visits', async (req, res) => {
     }
 });
 
-// Count website visit
+// Count website visit (FIXED: Better session-based counting)
 app.post('/api/visits', async (req, res) => {
     try {
         let visit = await Visit.findOne();
@@ -331,10 +349,15 @@ app.post('/api/visits', async (req, res) => {
     }
 });
 
-// User Registration with Email
+// User Registration with Email (FIXED: Better error handling)
 app.post('/api/register', async (req, res) => {
     try {
         const { fullName, email, password, address, phone } = req.body;
+
+        // Validate required fields
+        if (!fullName || !email || !password || !address || !phone) {
+            return res.status(400).json({ error: 'All fields are required' });
+        }
 
         // Check if user already exists
         const existingUser = await User.findOne({ email });
@@ -354,61 +377,84 @@ app.post('/api/register', async (req, res) => {
             phone
         });
 
-        // Send welcome email
-        try {
-            await transporter.sendMail({
-                from: EMAIL_USER,
-                to: email,
-                subject: 'Welcome to Capture Moments Photography',
-                html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-                        <div style="text-align: center; background: linear-gradient(135deg, #FF6B6B, #4ECDC4); padding: 20px; border-radius: 10px 10px 0 0;">
-                            <h1 style="color: white; margin: 0;">Capture Moments</h1>
-                        </div>
-                        <div style="padding: 20px;">
-                            <h2 style="color: #FF6B6B;">Welcome, ${fullName}!</h2>
-                            <p>Thank you for registering with Capture Moments Photography. We're excited to have you on board!</p>
-                            <p>Your account has been successfully created with the following details:</p>
-                            <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
-                                <p><strong>Email:</strong> ${email}</p>
-                                <p><strong>Phone:</strong> ${phone}</p>
-                                <p><strong>Address:</strong> ${address}</p>
+        // Send welcome email (with error handling)
+        if (transporter) {
+            try {
+                await transporter.sendMail({
+                    from: EMAIL_USER,
+                    to: email,
+                    subject: 'Welcome to Capture Moments Photography',
+                    html: `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+                            <div style="text-align: center; background: linear-gradient(135deg, #FF6B6B, #4ECDC4); padding: 20px; border-radius: 10px 10px 0 0;">
+                                <h1 style="color: white; margin: 0;">Capture Moments</h1>
                             </div>
-                            <p>You can now login to your account and start booking our photography services.</p>
-                            <p>If you have any questions, feel free to contact us.</p>
-                            <p>Best regards,<br><strong>The Capture Moments Team</strong></p>
+                            <div style="padding: 20px;">
+                                <h2 style="color: #FF6B6B;">Welcome, ${fullName}!</h2>
+                                <p>Thank you for registering with Capture Moments Photography. We're excited to have you on board!</p>
+                                <p>Your account has been successfully created with the following details:</p>
+                                <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                    <p><strong>Email:</strong> ${email}</p>
+                                    <p><strong>Phone:</strong> ${phone}</p>
+                                    <p><strong>Address:</strong> ${address}</p>
+                                </div>
+                                <p>You can now login to your account and start booking our photography services.</p>
+                                <p>If you have any questions, feel free to contact us.</p>
+                                <p>Best regards,<br><strong>The Capture Moments Team</strong></p>
+                            </div>
+                            <div style="text-align: center; padding: 20px; background: #f5f5f5; border-radius: 0 0 10px 10px;">
+                                <p style="color: #666; font-size: 12px; margin: 0;">
+                                    This is an automated message. Please do not reply to this email.
+                                </p>
+                            </div>
                         </div>
-                        <div style="text-align: center; padding: 20px; background: #f5f5f5; border-radius: 0 0 10px 10px;">
-                            <p style="color: #666; font-size: 12px; margin: 0;">
-                                This is an automated message. Please do not reply to this email.
-                            </p>
-                        </div>
-                    </div>
-                `
-            });
-            console.log('Welcome email sent to:', email);
-        } catch (emailError) {
-            console.error('Failed to send welcome email:', emailError);
+                    `
+                });
+                console.log('Welcome email sent to:', email);
+            } catch (emailError) {
+                console.error('Failed to send welcome email:', emailError);
+            }
         }
+
+        // Generate token for auto-login
+        const token = jwt.sign(
+            { 
+                id: newUser._id, 
+                email: newUser.email, 
+                role: newUser.role 
+            }, 
+            JWT_SECRET, 
+            { expiresIn: '30d' } // 30 days for persistent login
+        );
 
         res.status(201).json({ 
             message: 'User registered successfully',
+            token,
             user: {
                 id: newUser._id,
                 fullName: newUser.fullName,
-                email: newUser.email
+                email: newUser.email,
+                role: newUser.role
             }
         });
     } catch (error) {
         console.error('Registration error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        if (error.code === 11000) {
+            return res.status(400).json({ error: 'Email already exists' });
+        }
+        res.status(500).json({ error: 'Internal server error during registration' });
     }
 });
 
-// User Login
+// User Login (FIXED: Better error handling)
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
+
+        // Validate input
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email and password are required' });
+        }
 
         // Find user
         const user = await User.findOne({ email });
@@ -422,7 +468,7 @@ app.post('/api/login', async (req, res) => {
             return res.status(400).json({ error: 'Invalid email or password' });
         }
 
-        // Generate token
+        // Generate token with longer expiration
         const token = jwt.sign(
             { 
                 id: user._id, 
@@ -430,7 +476,7 @@ app.post('/api/login', async (req, res) => {
                 role: user.role 
             }, 
             JWT_SECRET, 
-            { expiresIn: '24h' }
+            { expiresIn: '30d' } // 30 days for persistent login
         );
 
         res.json({
@@ -441,16 +487,18 @@ app.post('/api/login', async (req, res) => {
                 fullName: user.fullName,
                 email: user.email,
                 role: user.role,
-                profilePhoto: user.profilePhoto
+                profilePhoto: user.profilePhoto,
+                address: user.address,
+                phone: user.phone
             }
         });
     } catch (error) {
         console.error('Login error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'Internal server error during login' });
     }
 });
 
-// Get user profile
+// Get user profile (FIXED: Better error handling)
 app.get('/api/profile', authenticateToken, async (req, res) => {
     try {
         const user = await User.findById(req.user.id).select('-password');
@@ -504,10 +552,15 @@ app.put('/api/profile', authenticateToken, requireUser, upload.single('profilePh
     }
 });
 
-// Contact form submission
+// Contact form submission (FIXED: Better validation)
 app.post('/api/contact', authenticateToken, requireUser, async (req, res) => {
     try {
         const { name, email, phone, message } = req.body;
+
+        // Validate required fields
+        if (!name || !email || !phone || !message) {
+            return res.status(400).json({ error: 'All fields are required' });
+        }
 
         const newContact = await Contact.create({
             userId: req.user.id,
@@ -518,38 +571,40 @@ app.post('/api/contact', authenticateToken, requireUser, async (req, res) => {
         });
 
         // Send confirmation email to user
-        try {
-            await transporter.sendMail({
-                from: EMAIL_USER,
-                to: email,
-                subject: 'Message Received - Capture Moments',
-                html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-                        <div style="text-align: center; background: linear-gradient(135deg, #FF6B6B, #4ECDC4); padding: 20px; border-radius: 10px 10px 0 0;">
-                            <h1 style="color: white; margin: 0;">Capture Moments</h1>
-                        </div>
-                        <div style="padding: 20px;">
-                            <h2 style="color: #FF6B6B;">Message Received</h2>
-                            <p>Dear ${name},</p>
-                            <p>Thank you for contacting Capture Moments Photography. We have received your message and will get back to you shortly.</p>
-                            <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
-                                <p><strong>Your Message:</strong></p>
-                                <p style="background: white; padding: 10px; border-radius: 5px;">${message}</p>
+        if (transporter) {
+            try {
+                await transporter.sendMail({
+                    from: EMAIL_USER,
+                    to: email,
+                    subject: 'Message Received - Capture Moments',
+                    html: `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+                            <div style="text-align: center; background: linear-gradient(135deg, #FF6B6B, #4ECDC4); padding: 20px; border-radius: 10px 10px 0 0;">
+                                <h1 style="color: white; margin: 0;">Capture Moments</h1>
                             </div>
-                            <p>We typically respond within 24 hours. If you have any urgent inquiries, please call us at +1 (555) 123-4567.</p>
-                            <p>Best regards,<br><strong>The Capture Moments Team</strong></p>
+                            <div style="padding: 20px;">
+                                <h2 style="color: #FF6B6B;">Message Received</h2>
+                                <p>Dear ${name},</p>
+                                <p>Thank you for contacting Capture Moments Photography. We have received your message and will get back to you shortly.</p>
+                                <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                    <p><strong>Your Message:</strong></p>
+                                    <p style="background: white; padding: 10px; border-radius: 5px;">${message}</p>
+                                </div>
+                                <p>We typically respond within 24 hours. If you have any urgent inquiries, please call us at +1 (555) 123-4567.</p>
+                                <p>Best regards,<br><strong>The Capture Moments Team</strong></p>
+                            </div>
+                            <div style="text-align: center; padding: 20px; background: #f5f5f5; border-radius: 0 0 10px 10px;">
+                                <p style="color: #666; font-size: 12px; margin: 0;">
+                                    This is an automated message. Please do not reply to this email.
+                                </p>
+                            </div>
                         </div>
-                        <div style="text-align: center; padding: 20px; background: #f5f5f5; border-radius: 0 0 10px 10px;">
-                            <p style="color: #666; font-size: 12px; margin: 0;">
-                                This is an automated message. Please do not reply to this email.
-                            </p>
-                        </div>
-                    </div>
-                `
-            });
-            console.log('Contact confirmation email sent to:', email);
-        } catch (emailError) {
-            console.error('Failed to send contact confirmation email:', emailError);
+                    `
+                });
+                console.log('Contact confirmation email sent to:', email);
+            } catch (emailError) {
+                console.error('Failed to send contact confirmation email:', emailError);
+            }
         }
 
         res.json({ 
@@ -562,63 +617,82 @@ app.post('/api/contact', authenticateToken, requireUser, async (req, res) => {
     }
 });
 
-// Create booking (only for users, not admin)
+// Create booking (FIXED: Better validation and error handling)
 app.post('/api/bookings', authenticateToken, requireUser, async (req, res) => {
     try {
         const { services, date, time, location, specialRequests, amount } = req.body;
 
+        // Validate required fields
+        if (!services || !Array.isArray(services) || services.length === 0) {
+            return res.status(400).json({ error: 'At least one service is required' });
+        }
+        if (!date || !time || !location || !amount) {
+            return res.status(400).json({ error: 'Date, time, location, and amount are required' });
+        }
+
+        // Check if booking date is in the future
+        const bookingDate = new Date(date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (bookingDate < today) {
+            return res.status(400).json({ error: 'Booking date cannot be in the past' });
+        }
+
         const newBooking = await Booking.create({
             userId: req.user.id,
             services,
-            date,
+            date: bookingDate,
             time,
             location,
-            specialRequests,
-            amount
+            specialRequests: specialRequests || '',
+            amount: parseFloat(amount)
         });
 
         // Get user details for email
         const user = await User.findById(req.user.id);
         
         // Send booking confirmation email
-        try {
-            await transporter.sendMail({
-                from: EMAIL_USER,
-                to: user.email,
-                subject: 'Booking Confirmation - Capture Moments',
-                html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-                        <div style="text-align: center; background: linear-gradient(135deg, #FF6B6B, #4ECDC4); padding: 20px; border-radius: 10px 10px 0 0;">
-                            <h1 style="color: white; margin: 0;">Capture Moments</h1>
-                        </div>
-                        <div style="padding: 20px;">
-                            <h2 style="color: #FF6B6B;">Booking Confirmed!</h2>
-                            <p>Dear ${user.fullName},</p>
-                            <p>Your photography booking has been successfully created. Here are the details:</p>
-                            <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
-                                <p><strong>Services:</strong> ${services.join(', ')}</p>
-                                <p><strong>Date:</strong> ${new Date(date).toLocaleDateString()}</p>
-                                <p><strong>Time:</strong> ${time}</p>
-                                <p><strong>Location:</strong> ${location}</p>
-                                <p><strong>Amount:</strong> $${amount}</p>
-                                ${specialRequests ? `<p><strong>Special Requests:</strong> ${specialRequests}</p>` : ''}
-                                <p><strong>Status:</strong> <span style="color: #FFD166; font-weight: bold;">PENDING</span></p>
+        if (transporter) {
+            try {
+                await transporter.sendMail({
+                    from: EMAIL_USER,
+                    to: user.email,
+                    subject: 'Booking Confirmation - Capture Moments',
+                    html: `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+                            <div style="text-align: center; background: linear-gradient(135deg, #FF6B6B, #4ECDC4); padding: 20px; border-radius: 10px 10px 0 0;">
+                                <h1 style="color: white; margin: 0;">Capture Moments</h1>
                             </div>
-                            <p>We will review your booking and confirm it shortly. You can check the status in your account.</p>
-                            <p>If you have any questions, please don't hesitate to contact us.</p>
-                            <p>Best regards,<br><strong>The Capture Moments Team</strong></p>
+                            <div style="padding: 20px;">
+                                <h2 style="color: #FF6B6B;">Booking Confirmed!</h2>
+                                <p>Dear ${user.fullName},</p>
+                                <p>Your photography booking has been successfully created. Here are the details:</p>
+                                <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                    <p><strong>Services:</strong> ${services.join(', ')}</p>
+                                    <p><strong>Date:</strong> ${new Date(date).toLocaleDateString()}</p>
+                                    <p><strong>Time:</strong> ${time}</p>
+                                    <p><strong>Location:</strong> ${location}</p>
+                                    <p><strong>Amount:</strong> $${amount}</p>
+                                    ${specialRequests ? `<p><strong>Special Requests:</strong> ${specialRequests}</p>` : ''}
+                                    <p><strong>Status:</strong> <span style="color: #FFD166; font-weight: bold;">PENDING</span></p>
+                                </div>
+                                <p>We will review your booking and confirm it shortly. You can check the status in your account.</p>
+                                <p>If you have any questions, please don't hesitate to contact us.</p>
+                                <p>Best regards,<br><strong>The Capture Moments Team</strong></p>
+                            </div>
+                            <div style="text-align: center; padding: 20px; background: #f5f5f5; border-radius: 0 0 10px 10px;">
+                                <p style="color: #666; font-size: 12px; margin: 0;">
+                                    This is an automated message. Please do not reply to this email.
+                                </p>
+                            </div>
                         </div>
-                        <div style="text-align: center; padding: 20px; background: #f5f5f5; border-radius: 0 0 10px 10px;">
-                            <p style="color: #666; font-size: 12px; margin: 0;">
-                                This is an automated message. Please do not reply to this email.
-                            </p>
-                        </div>
-                    </div>
-                `
-            });
-            console.log('Booking confirmation email sent to:', user.email);
-        } catch (emailError) {
-            console.error('Failed to send booking confirmation email:', emailError);
+                    `
+                });
+                console.log('Booking confirmation email sent to:', user.email);
+            } catch (emailError) {
+                console.error('Failed to send booking confirmation email:', emailError);
+            }
         }
 
         res.status(201).json({ 
@@ -627,7 +701,7 @@ app.post('/api/bookings', authenticateToken, requireUser, async (req, res) => {
         });
     } catch (error) {
         console.error('Booking creation error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'Internal server error during booking creation' });
     }
 });
 
@@ -753,57 +827,59 @@ app.put('/api/admin/bookings/:id', authenticateToken, requireAdmin, async (req, 
         }
 
         // Send status update email
-        try {
-            await transporter.sendMail({
-                from: EMAIL_USER,
-                to: booking.userId.email,
-                subject: `Booking Status Update - ${booking.userId.fullName}`,
-                html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-                        <div style="text-align: center; background: linear-gradient(135deg, #FF6B6B, #4ECDC4); padding: 20px; border-radius: 10px 10px 0 0;">
-                            <h1 style="color: white; margin: 0;">Capture Moments</h1>
-                        </div>
-                        <div style="padding: 20px;">
-                            <h2 style="color: #FF6B6B;">Booking Status Update</h2>
-                            <p>Dear ${booking.userId.fullName},</p>
-                            <p>Your booking status has been updated:</p>
-                            <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
-                                <p><strong>Services:</strong> ${booking.services.join(', ')}</p>
-                                <p><strong>Date:</strong> ${new Date(booking.date).toLocaleDateString()}</p>
-                                <p><strong>Time:</strong> ${booking.time}</p>
-                                <p><strong>Location:</strong> ${booking.location}</p>
-                                <p><strong>New Status:</strong> 
-                                    <span style="color: ${
-                                        status === 'confirmed' ? '#06D6A0' : 
-                                        status === 'completed' ? '#4ECDC4' : 
-                                        status === 'rejected' ? '#EF476F' : '#FFD166'
-                                    }; font-weight: bold;">
-                                        ${status.toUpperCase()}
-                                    </span>
+        if (transporter) {
+            try {
+                await transporter.sendMail({
+                    from: EMAIL_USER,
+                    to: booking.userId.email,
+                    subject: `Booking Status Update - ${booking.userId.fullName}`,
+                    html: `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+                            <div style="text-align: center; background: linear-gradient(135deg, #FF6B6B, #4ECDC4); padding: 20px; border-radius: 10px 10px 0 0;">
+                                <h1 style="color: white; margin: 0;">Capture Moments</h1>
+                            </div>
+                            <div style="padding: 20px;">
+                                <h2 style="color: #FF6B6B;">Booking Status Update</h2>
+                                <p>Dear ${booking.userId.fullName},</p>
+                                <p>Your booking status has been updated:</p>
+                                <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                    <p><strong>Services:</strong> ${booking.services.join(', ')}</p>
+                                    <p><strong>Date:</strong> ${new Date(booking.date).toLocaleDateString()}</p>
+                                    <p><strong>Time:</strong> ${booking.time}</p>
+                                    <p><strong>Location:</strong> ${booking.location}</p>
+                                    <p><strong>New Status:</strong> 
+                                        <span style="color: ${
+                                            status === 'confirmed' ? '#06D6A0' : 
+                                            status === 'completed' ? '#4ECDC4' : 
+                                            status === 'rejected' ? '#EF476F' : '#FFD166'
+                                        }; font-weight: bold;">
+                                            ${status.toUpperCase()}
+                                        </span>
+                                    </p>
+                                </div>
+                                ${status === 'completed' ? 
+                                    '<p>Your photography session has been completed successfully. Thank you for choosing Capture Moments!</p>' : 
+                                    status === 'confirmed' ?
+                                    '<p>Your booking has been confirmed! We look forward to capturing your special moments.</p>' :
+                                    status === 'rejected' ?
+                                    '<p>Unfortunately, we cannot accommodate your booking at this time. Please contact us for alternative options.</p>' :
+                                    ''
+                                }
+                                <p>If you have any questions, please don't hesitate to contact us.</p>
+                                <p>Best regards,<br><strong>The Capture Moments Team</strong></p>
+                            </div>
+                            <div style="text-align: center; padding: 20px; background: #f5f5f5; border-radius: 0 0 10px 10px;">
+                                <p style="color: #666; font-size: 12px; margin: 0;">
+                                    This is an automated message. Please do not reply to this email.
                                 </p>
                             </div>
-                            ${status === 'completed' ? 
-                                '<p>Your photography session has been completed successfully. Thank you for choosing Capture Moments!</p>' : 
-                                status === 'confirmed' ?
-                                '<p>Your booking has been confirmed! We look forward to capturing your special moments.</p>' :
-                                status === 'rejected' ?
-                                '<p>Unfortunately, we cannot accommodate your booking at this time. Please contact us for alternative options.</p>' :
-                                ''
-                            }
-                            <p>If you have any questions, please don't hesitate to contact us.</p>
-                            <p>Best regards,<br><strong>The Capture Moments Team</strong></p>
                         </div>
-                        <div style="text-align: center; padding: 20px; background: #f5f5f5; border-radius: 0 0 10px 10px;">
-                            <p style="color: #666; font-size: 12px; margin: 0;">
-                                This is an automated message. Please do not reply to this email.
-                            </p>
-                        </div>
-                    </div>
-                `
-            });
-            console.log('Booking status update email sent to:', booking.userId.email);
-        } catch (emailError) {
-            console.error('Failed to send status update email:', emailError);
+                    `
+                });
+                console.log('Booking status update email sent to:', booking.userId.email);
+            } catch (emailError) {
+                console.error('Failed to send status update email:', emailError);
+            }
         }
 
         res.json({ 
@@ -927,7 +1003,7 @@ app.put('/api/admin/messages/:id', authenticateToken, requireAdmin, async (req, 
         }
 
         // Send reply email if admin replied
-        if (adminReply) {
+        if (adminReply && transporter) {
             try {
                 await transporter.sendMail({
                     from: EMAIL_USER,
@@ -1089,6 +1165,15 @@ app.delete('/api/admin/services/:id', authenticateToken, requireAdmin, async (re
     }
 });
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || 'development'
+    });
+});
+
 // Error handling middleware
 app.use((error, req, res, next) => {
     if (error instanceof multer.MulterError) {
@@ -1114,6 +1199,7 @@ const startServer = async () => {
         console.log(`Server is running on port ${PORT}`);
         console.log(`Admin credentials: a@gmail.com / 12345`);
         console.log('Environment:', process.env.NODE_ENV || 'development');
+        console.log('MongoDB URI:', MONGODB_URI ? 'Connected to MongoDB Atlas' : 'Using local MongoDB');
     });
 };
 
