@@ -19,8 +19,8 @@ const EMAIL_PASS = process.env.EMAIL_PASS || 'krfotyhksoxsoynf';
 
 // Middleware
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static('public'));
 
 // MongoDB Connection with better error handling
@@ -43,7 +43,7 @@ const userSchema = new mongoose.Schema({
     password: { type: String, required: true },
     address: { type: String, required: true },
     phone: { type: String, required: true },
-    profilePhoto: { type: String },
+    profilePhoto: { type: String }, // Store base64 or URL
     role: { type: String, default: 'user' },
     createdAt: { type: Date, default: Date.now }
 });
@@ -72,7 +72,7 @@ const contactSchema = new mongoose.Schema({
 });
 
 const carouselSchema = new mongoose.Schema({
-    image: { type: String, required: true },
+    image: { type: String, required: true }, // Store base64 image data
     title: { type: String, required: true },
     description: { type: String, required: true },
     createdAt: { type: Date, default: Date.now }
@@ -82,7 +82,7 @@ const serviceSchema = new mongoose.Schema({
     name: { type: String, required: true },
     description: { type: String, required: true },
     price: { type: Number, required: true },
-    image: { type: String },
+    image: { type: String }, // Store base64 image data
     isNew: { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now }
 });
@@ -100,19 +100,8 @@ const Carousel = mongoose.model('Carousel', carouselSchema);
 const Service = mongoose.model('Service', serviceSchema);
 const Visit = mongoose.model('Visit', visitSchema);
 
-// File upload configuration
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const uploadDir = 'public/uploads/';
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + '-' + file.originalname);
-    }
-});
+// File upload configuration with base64 conversion
+const storage = multer.memoryStorage(); // Store files in memory as buffers
 
 const upload = multer({ 
     storage: storage,
@@ -124,18 +113,32 @@ const upload = multer({
         }
     },
     limits: {
-        fileSize: 5 * 1024 * 1024 // 5MB limit
+        fileSize: 10 * 1024 * 1024 // 10MB limit for base64 conversion
     }
 });
 
-// Email transporter configuration (with better error handling)
+// Convert buffer to base64
+function bufferToBase64(buffer, mimetype) {
+    return `data:${mimetype};base64,${buffer.toString('base64')}`;
+}
+
+// Email transporter configuration
 let transporter;
 try {
-    transporter = nodemailer.createTransport({
+    transporter = nodemailer.createTransporter({
         service: 'gmail',
         auth: {
             user: EMAIL_USER,
             pass: EMAIL_PASS
+        }
+    });
+    
+    // Verify transporter configuration
+    transporter.verify(function(error, success) {
+        if (error) {
+            console.warn('Email transporter configuration failed:', error);
+        } else {
+            console.log('Email transporter is ready to send messages');
         }
     });
 } catch (emailError) {
@@ -225,7 +228,7 @@ const initializeData = async () => {
             console.log('Admin user created: a@gmail.com / 12345');
         }
 
-        // Create default services
+        // Create default services with base64 images
         const defaultServices = [
             {
                 name: 'Wedding Photography',
@@ -266,7 +269,7 @@ const initializeData = async () => {
             }
         }
 
-        // Create default carousel images
+        // Create default carousel images with URLs (will be converted to base64 if needed)
         const defaultCarousel = [
             {
                 image: 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80',
@@ -513,23 +516,16 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
     }
 });
 
-// Update user profile
+// Update user profile with base64 image storage
 app.put('/api/profile', authenticateToken, requireUser, upload.single('profilePhoto'), async (req, res) => {
     try {
         const { fullName, address, phone } = req.body;
         const updateData = { fullName, address, phone };
         
         if (req.file) {
-            updateData.profilePhoto = '/uploads/' + req.file.filename;
-            
-            // Delete old profile photo if exists
-            const oldUser = await User.findById(req.user.id);
-            if (oldUser.profilePhoto && oldUser.profilePhoto.startsWith('/uploads/')) {
-                const oldPhotoPath = path.join(__dirname, 'public', oldUser.profilePhoto);
-                if (fs.existsSync(oldPhotoPath)) {
-                    fs.unlinkSync(oldPhotoPath);
-                }
-            }
+            // Convert uploaded image to base64 and store in database
+            const base64Image = bufferToBase64(req.file.buffer, req.file.mimetype);
+            updateData.profilePhoto = base64Image;
         }
 
         const updatedUser = await User.findByIdAndUpdate(
@@ -961,14 +957,6 @@ app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req, 
         await Booking.deleteMany({ userId: req.params.id });
         await Contact.deleteMany({ userId: req.params.id });
 
-        // Delete user's profile photo if exists
-        if (user.profilePhoto && user.profilePhoto.startsWith('/uploads/')) {
-            const photoPath = path.join(__dirname, 'public', user.profilePhoto);
-            if (fs.existsSync(photoPath)) {
-                fs.unlinkSync(photoPath);
-            }
-        }
-
         res.json({ message: 'User deleted successfully' });
     } catch (error) {
         console.error('User delete error:', error);
@@ -1051,7 +1039,7 @@ app.put('/api/admin/messages/:id', authenticateToken, requireAdmin, async (req, 
     }
 });
 
-// Add carousel image (admin only) - MAX 4 IMAGES
+// Add carousel image (admin only) - MAX 4 IMAGES with base64 storage
 app.post('/api/admin/carousel', authenticateToken, requireAdmin, upload.single('image'), async (req, res) => {
     try {
         const count = await Carousel.countDocuments();
@@ -1065,8 +1053,11 @@ app.post('/api/admin/carousel', authenticateToken, requireAdmin, upload.single('
 
         const { title, description } = req.body;
 
+        // Convert uploaded image to base64 and store in database
+        const base64Image = bufferToBase64(req.file.buffer, req.file.mimetype);
+
         const newImage = await Carousel.create({
-            image: '/uploads/' + req.file.filename,
+            image: base64Image, // Store base64 in database
             title: title || 'New Carousel Image',
             description: description || 'Carousel image description'
         });
@@ -1089,14 +1080,6 @@ app.delete('/api/admin/carousel/:id', authenticateToken, requireAdmin, async (re
             return res.status(404).json({ error: 'Image not found' });
         }
 
-        // Delete file from filesystem if it's not a default URL
-        if (image.image.startsWith('/uploads/')) {
-            const imagePath = path.join(__dirname, 'public', image.image);
-            if (fs.existsSync(imagePath)) {
-                fs.unlinkSync(imagePath);
-            }
-        }
-
         res.json({ message: 'Carousel image deleted successfully' });
     } catch (error) {
         console.error('Carousel delete error:', error);
@@ -1104,7 +1087,7 @@ app.delete('/api/admin/carousel/:id', authenticateToken, requireAdmin, async (re
     }
 });
 
-// Add new service (admin only)
+// Add new service (admin only) with base64 image storage
 app.post('/api/admin/services', authenticateToken, requireAdmin, upload.single('image'), async (req, res) => {
     try {
         const { name, description, price } = req.body;
@@ -1127,7 +1110,9 @@ app.post('/api/admin/services', authenticateToken, requireAdmin, upload.single('
         };
 
         if (req.file) {
-            serviceData.image = '/uploads/' + req.file.filename;
+            // Convert uploaded image to base64 and store in database
+            const base64Image = bufferToBase64(req.file.buffer, req.file.mimetype);
+            serviceData.image = base64Image;
         }
 
         const newService = await Service.create(serviceData);
@@ -1150,14 +1135,6 @@ app.delete('/api/admin/services/:id', authenticateToken, requireAdmin, async (re
             return res.status(404).json({ error: 'Service not found' });
         }
 
-        // Delete image file if exists and it's not a default image
-        if (service.image && service.image.startsWith('/uploads/')) {
-            const imagePath = path.join(__dirname, 'public', service.image);
-            if (fs.existsSync(imagePath)) {
-                fs.unlinkSync(imagePath);
-            }
-        }
-
         res.json({ message: 'Service deleted successfully' });
     } catch (error) {
         console.error('Service delete error:', error);
@@ -1170,15 +1147,22 @@ app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'OK', 
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+        email: transporter ? 'Configured' : 'Not Configured'
     });
+});
+
+// Serve uploaded images (for backward compatibility)
+app.get('/uploads/:filename', (req, res) => {
+    res.status(404).json({ error: 'Image not found. Images are now stored in database.' });
 });
 
 // Error handling middleware
 app.use((error, req, res, next) => {
     if (error instanceof multer.MulterError) {
         if (error.code === 'LIMIT_FILE_SIZE') {
-            return res.status(400).json({ error: 'File too large. Maximum size is 5MB.' });
+            return res.status(400).json({ error: 'File too large. Maximum size is 10MB.' });
         }
     }
     
@@ -1200,6 +1184,8 @@ const startServer = async () => {
         console.log(`Admin credentials: a@gmail.com / 12345`);
         console.log('Environment:', process.env.NODE_ENV || 'development');
         console.log('MongoDB URI:', MONGODB_URI ? 'Connected to MongoDB Atlas' : 'Using local MongoDB');
+        console.log('Email Service:', transporter ? 'Configured' : 'Not Configured - check EMAIL_USER and EMAIL_PASS');
+        console.log('Image Storage: Database (Base64)');
     });
 };
 
